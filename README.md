@@ -9,6 +9,27 @@ A self-hosted platform for cataloguing, valuing, and selling the things you coll
 
 The built-in **Storefront** module connects opama to your own e-commerce site: list items, set prices, publish a `catalog.json` to your site's GitHub repo in one click (auto-deploys via Cloudflare Pages), and have Stripe sales written back to opama automatically.
 
+## Contents
+
+**Using opama**
+- [Features](#features)
+- [Quick Start](#quick-start)
+- [System Tray (Linux)](#system-tray-linux)
+- [In-App System Panel](#in-app-system-panel)
+- [Storefront Module](#storefront-module)
+- 📖 Full walkthrough: [USERGUIDE.md](USERGUIDE.md)
+
+**For developers**
+- [Tech Stack](#tech-stack)
+- [Project Structure](#project-structure)
+- [Environment Variables](#environment-variables)
+- [Database Migrations](#database-migrations)
+- [AI / RAG Pipeline](#ai--rag-pipeline)
+- [API Reference](#api-reference)
+- [Development Notes](#development-notes)
+- [Scripts](#scripts)
+- [Contributing](#contributing)
+
 ---
 
 ## Features
@@ -90,6 +111,20 @@ The setup wizard prompts for a Postgres password, your auth provider (**local** 
 - **Dashboard:** http://localhost:5173
 - **API docs:** http://localhost:6000/docs
 
+### 4. Create your account
+
+Open http://localhost:5173 and click **Login** in the top-right corner.
+
+- **Local accounts** (the default) — pick a username. A password is
+  optional for local-only use; opama will nudge you to set one later from
+  **Profile** before the instance becomes reachable from outside your
+  machine.
+- The **first account created becomes an admin**, which is needed to enable
+  optional modules from the **Modules** page.
+
+From here, [USERGUIDE.md](USERGUIDE.md) walks through Collections,
+Portfolio, and the Storefront in detail.
+
 ### Optional: demo data
 
 To see the dashboard populated before adding your own items:
@@ -121,6 +156,19 @@ cards, coins, vinyl) across several categories. Every item is tagged
 ```
 
 The same commands work on Windows via `.\opama.ps1 <command>` (tray not supported on Windows).
+
+### Troubleshooting first-time setup
+
+| Symptom | Likely cause / fix |
+|---|---|
+| `./opama.sh start` fails immediately | Docker Desktop / OrbStack isn't running — start it, then retry |
+| "port is already allocated" | Something else is using `5173`, `6000`, or `5433` — stop it, or edit the port mappings in `docker-compose.yml` |
+| Dashboard shows a blank page or won't load | The backend can take a few seconds to become healthy on first start — refresh, or check `./opama.sh status` |
+| Dashboard loads but everything errors (red status dot in the header) | Backend isn't healthy yet, or `.env`/`.env.local` is missing — re-run `./opama.sh setup` |
+| Login modal asks for an email instead of a username | `AUTH_PROVIDER` is set to `firebase` — re-run `./opama.sh setup` and choose **local** unless you have a Firebase project configured |
+| Want to reach opama from another device or the internet | The default setup is `localhost`-only — see [docs/DOCKER_GUIDE.md](docs/DOCKER_GUIDE.md#production-notes) for `CORS_ORIGINS`/`PUBLIC_API_URL`/TLS before exposing it |
+
+Still stuck? Run `./opama.sh logs` (or `./opama.sh logs backend`) for details, and check existing [GitHub Issues](../../issues) before opening a new one.
 
 ---
 
@@ -183,6 +231,10 @@ docker restart opama-frontend
 ```
 
 ---
+
+> The sections below (Project Structure through Scripts) are reference
+> material for developers and contributors. If you just want to use opama,
+> [USERGUIDE.md](USERGUIDE.md) is the next place to go.
 
 ## Project Structure
 
