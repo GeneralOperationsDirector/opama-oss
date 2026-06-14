@@ -88,5 +88,20 @@
     "category": "Social",
     "tags": ["showcase"],
     "enable_plugins": "showcase"
+  },
+  {
+    "id": "insurance",
+    "name": "Insurance & Appraisals",
+    "description": "Track insurance policies, scheduled coverage, and appraisal records for items in your collection.",
+    "version": "1.0.0",
+    "tier": "free",
+    "type": "builtin",
+    "icon": "🛡️",
+    "author": "opama",
+    "repo": "",
+    "manifest_url": "",
+    "category": "Tools",
+    "tags": ["insurance", "appraisals"],
+    "enable_plugins": "insurance"
   }
 ]

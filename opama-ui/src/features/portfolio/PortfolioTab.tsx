@@ -51,9 +51,9 @@ export default function PortfolioTab({ userId, onOpenDetails, onToast }: Portfol
     setLoading(true);
     try {
       const [valueData, historyData, summaryData] = await Promise.all([
-        api<PortfolioValue>(`/portfolio/value?user_id=${userId}`),
-        api<PortfolioHistory>(`/portfolio/history?user_id=${userId}&days=90`),
-        api<RealizedGainsSummary>(`/portfolio/sales/summary?user_id=${userId}`),
+        api<PortfolioValue>(`/portfolio/value`),
+        api<PortfolioHistory>(`/portfolio/history?days=90`),
+        api<RealizedGainsSummary>(`/portfolio/sales/summary`),
       ]);
       setPortfolioValue(valueData);
       setHistory(historyData);
@@ -68,9 +68,9 @@ export default function PortfolioTab({ userId, onOpenDetails, onToast }: Portfol
   const handleCreateSnapshot = async () => {
     setSnapshotLoading(true);
     try {
-      await api(`/portfolio/snapshot?user_id=${userId}`, { method: "POST" });
+      await api(`/portfolio/snapshot`, { method: "POST" });
       onToast?.("Snapshot created", "success");
-      const historyData = await api<PortfolioHistory>(`/portfolio/history?user_id=${userId}&days=90`);
+      const historyData = await api<PortfolioHistory>(`/portfolio/history?days=90`);
       setHistory(historyData);
     } catch (err) {
       onToast?.(err instanceof Error ? err.message : "Failed to create snapshot", "error");
@@ -139,7 +139,6 @@ export default function PortfolioTab({ userId, onOpenDetails, onToast }: Portfol
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          user_id: userId,
           card_id: saleItem.item.card_id,
           inventory_item_id: saleItem.item.id,
           quantity_sold: saleData.quantity_sold,
@@ -315,7 +314,6 @@ export default function PortfolioTab({ userId, onOpenDetails, onToast }: Portfol
 
       {activeView === "sales" && (
         <SalesHistory
-          userId={userId}
           summary={salesSummary}
           onToast={onToast}
           onOpenDetails={onOpenDetails}

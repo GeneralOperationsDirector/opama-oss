@@ -32,6 +32,7 @@ import MainPortfolioView from "./features/portfolio/MainPortfolioView";
 import CustomAssetsModule from "./features/custom-assets/CustomAssetsModule";
 import StorefrontModule from "./features/storefront/StorefrontModule";
 import GradingView from "./features/grading/GradingView";
+import InsuranceModule from "./features/insurance/InsuranceModule";
 import SystemPanel from "./features/system/SystemPanel";
 import PluginStoreModule from "./features/plugin-store/PluginStoreModule";
 import Toaster from "./shared/Toaster";
@@ -555,6 +556,15 @@ export default function OpamaApp() {
         {isModuleEnabled("grading") && activeModule === "grading" && (
           currentUser ? (
             <GradingView userId={userId} onToast={addToast} />
+          ) : (
+            <GuestPrompt onSignUp={() => openAuth('signup')} onSignIn={() => openAuth('login')} />
+          )
+        )}
+
+        {/* ── Insurance & Appraisals module ── */}
+        {isModuleEnabled("insurance") && activeModule === "insurance" && (
+          currentUser ? (
+            <InsuranceModule userId={userId} onToast={addToast} />
           ) : (
             <GuestPrompt onSignUp={() => openAuth('signup')} onSignIn={() => openAuth('login')} />
           )

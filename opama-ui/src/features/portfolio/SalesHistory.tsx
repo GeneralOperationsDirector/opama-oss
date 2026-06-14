@@ -5,14 +5,13 @@ import { api } from "../../lib/api";
 import type { SaleTransaction, RealizedGainsSummary } from "../../types";
 
 interface SalesHistoryProps {
-  userId: number;
   summary: RealizedGainsSummary | null;
   onToast?: (message: string, type?: "success" | "error" | "info") => void;
   onOpenDetails?: (cardId: string) => void;
   onSaleDeleted?: () => void;
 }
 
-export default function SalesHistory({ userId, summary, onToast, onOpenDetails, onSaleDeleted }: SalesHistoryProps) {
+export default function SalesHistory({ summary, onToast, onOpenDetails, onSaleDeleted }: SalesHistoryProps) {
   const [sales, setSales] = useState<SaleTransaction[]>([]);
   const [loading, setLoading] = useState(false);
   const [limit, setLimit] = useState(10);
@@ -21,7 +20,7 @@ export default function SalesHistory({ userId, summary, onToast, onOpenDetails, 
   const fetchSales = async () => {
     setLoading(true);
     try {
-      const data = await api<SaleTransaction[]>(`/portfolio/sales?user_id=${userId}&limit=${limit}`);
+      const data = await api<SaleTransaction[]>(`/portfolio/sales?limit=${limit}`);
       setSales(data);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to load sales history";
@@ -58,7 +57,7 @@ export default function SalesHistory({ userId, summary, onToast, onOpenDetails, 
 
   useEffect(() => {
     fetchSales();
-  }, [userId, limit]);
+  }, [limit]);
 
   if (!summary) {
     return (

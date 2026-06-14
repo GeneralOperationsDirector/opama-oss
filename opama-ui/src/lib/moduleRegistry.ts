@@ -89,6 +89,14 @@ export const ALL_MODULES: ModuleDescriptor[] = [
     navPosition: "topnav",
     description: "Enable built-in modules and install community extensions",
   },
+  {
+    id: "insurance",
+    label: "Insurance",
+    emoji: "🛡️",
+    tier: "free",
+    navPosition: "dashboard-only",
+    description: "Track insurance policies, scheduled coverage, and appraisal records",
+  },
 ];
 
 // Resolve enabled set from build-time env var.
@@ -107,6 +115,7 @@ const _BACKEND_TO_FRONTEND: Record<string, string> = {
   storefront: "storefront",
   ai: "ai",
   showcase: "showcase",
+  insurance: "insurance",
 };
 
 // All known builtin frontend module IDs (the values of _BACKEND_TO_FRONTEND).

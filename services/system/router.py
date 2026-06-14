@@ -2,7 +2,6 @@
 System info endpoint — used by the in-app status panel.
 Returns non-sensitive operational stats for the current user's data.
 """
-import os
 import platform
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,6 +9,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, Query
 from sqlmodel import Session, select, func
 
+from app.version import CORE_VERSION
 from services.shared.database import get_session
 from services.shared.models import User
 from services.shared.models_security import AuditLog
@@ -81,7 +81,7 @@ def system_info(
 
     return {
         "uptime": f"{hours}h {minutes}m",
-        "api_version": os.getenv("APP_VERSION", "dev"),
+        "api_version": CORE_VERSION,
         "python": platform.python_version(),
         "uploads_mb": _dir_size_mb(_UPLOADS),
         "your_data": {

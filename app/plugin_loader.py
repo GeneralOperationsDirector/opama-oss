@@ -79,6 +79,10 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from packaging.specifiers import InvalidSpecifier, SpecifierSet
+from packaging.version import Version
+
+from app.version import CORE_VERSION
 
 SERVICES_DIR = Path(__file__).resolve().parents[1] / "services"
 
@@ -96,6 +100,7 @@ BUILTIN_MODULE_SERVICE_IDS: dict[str, list[str]] = {
     "storefront":  ["storefront"],
     "ai":          ["ai", "decks"],
     "showcase":    ["showcase"],
+    "insurance":   ["insurance"],
 }
 
 # Tracks which plugin IDs are active in the current process.
@@ -173,6 +178,7 @@ class PluginManifest:
     router_attr: str = "router"
     model_modules: list[str] = field(default_factory=list)
     requires: list[str] = field(default_factory=list)
+    requires_core: str = ""       # PEP 440 specifier, e.g. ">=0.1.0,<0.2.0" — see docs/RELEASE_PROCESS.md
     # remote-only fields
     remote_url: str = ""         # required for type=remote
     auth_type: str = "none"      # none | signed_jwt
@@ -185,6 +191,23 @@ class LoadedPlugin:
     router: "Any"  # APIRouter — typed as Any to avoid top-level FastAPI import
 
 
+def _core_compatible(manifest: PluginManifest) -> bool:
+    """True if this opama core version satisfies manifest.requires_core.
+
+    requires_core is a PEP 440 specifier set, e.g. ">=0.1.0,<0.2.0" — see
+    docs/RELEASE_PROCESS.md. Empty/missing requires_core means "no
+    constraint", so existing manifests that predate this field are
+    unaffected. A malformed specifier is treated as compatible (don't brick
+    the instance) — tests/test_plugin_manifests.py catches malformed specs.
+    """
+    if not manifest.requires_core:
+        return True
+    try:
+        return Version(CORE_VERSION) in SpecifierSet(manifest.requires_core)
+    except InvalidSpecifier:
+        return True
+
+
 def discover_plugins() -> list[PluginManifest]:
     """
     Scan services/ for plugin.yaml manifests, plus any PLUGIN_PATHS roots
@@ -195,6 +218,10 @@ def discover_plugins() -> list[PluginManifest]:
     Each PLUGIN_PATHS root's directory is added to sys.path so its plugin
     packages' router_module/model_modules dotted paths import normally —
     no different from how services.<id>.<module> resolves via PYTHONPATH=/app.
+
+    Manifests whose requires_core specifier excludes this opama core
+    (see _core_compatible()) are logged and excluded from the returned list
+    — see docs/RELEASE_PROCESS.md.
     """
     search_dirs = [SERVICES_DIR, *_external_plugin_roots()]
 
@@ -215,7 +242,19 @@ def discover_plugins() -> list[PluginManifest]:
             manifests.append(_manifest_from_dict(data))
 
     manifests.extend(discover_entry_point_modules())
-    return manifests
+
+    import logging
+    log = logging.getLogger("uvicorn.error")
+    compatible: list[PluginManifest] = []
+    for m in manifests:
+        if _core_compatible(m):
+            compatible.append(m)
+        else:
+            log.warning(
+                "⚠️  Skipping plugin '%s': requires_core '%s' is incompatible with this opama core (%s)",
+                m.id, m.requires_core, CORE_VERSION,
+            )
+    return compatible
 
 
 def discover_entry_point_modules() -> list[PluginManifest]:
@@ -348,6 +387,7 @@ def _manifest_from_dict(data: dict) -> PluginManifest:
         router_attr=data.get("router_attr", "router"),
         model_modules=data.get("model_modules", []),
         requires=data.get("requires", []),
+        requires_core=data.get("requires_core", ""),
         remote_url=data.get("remote_url", ""),
         auth_type=data.get("auth_type", "none"),
         scopes=data.get("scopes", []),

@@ -432,9 +432,11 @@ export default function CustomAssetsModule({ userId, onToast, pendingTemplateId,
               >
                 <AssetCard
                   asset={asset}
+                  userId={userId}
                   onEdit={() => { setEditing(asset); setView("edit"); }}
                   onDelete={() => setPendingDelete(asset)}
                   onOpen={() => { setDetail(asset); setView("detail"); }}
+                  onToast={onToast}
                 />
               </motion.div>
             ))}

@@ -35,6 +35,13 @@ services:
       # Core (open-source-tier) plugins only — auth is always loaded regardless.
       ENABLED_PLUGINS: custom_assets,integrations,licensing,plugin_store,system
       OPAMA_LICENSE_KEY: ""
+      # Required for the Plugin Store to install opama-branded modules
+      # (Pokémon TCG, Grading, Portfolio, etc.) that now live in
+      # external_plugins/ — see external_plugins/README.md.
+      PLUGIN_PATHS: ${PLUGIN_PATHS:-/app/external_plugins}
+      # Persisted so Plugin Store "enable" overrides survive container
+      # recreation, not just plain restarts.
+      DYNAMIC_PLUGINS_ROOT: ${DYNAMIC_PLUGINS_ROOT:-/app/dynamic_plugins}
       # This stack is the designated test bed for local-account auth (overrides
       # the firebase pin in .env.local — see auth_provider_plan memory).
       AUTH_PROVIDER: local
@@ -51,8 +58,10 @@ services:
     volumes:
       - ./app:/app/app
       - ./services:/app/services
+      - ./external_plugins:/app/external_plugins
       - ./uploads_oss_test:/app/uploads
       - oss_pip_modules_data:/app/pip-modules
+      - oss_dynamic_plugins_data:/app/dynamic_plugins
       - ./requirements-modules.txt:/app/requirements-modules.txt
       - ./alembic:/app/alembic
       - ./alembic.ini:/app/alembic.ini
@@ -119,3 +128,4 @@ volumes:
   oss_postgres_data:
   oss_frontend_node_modules:
   oss_pip_modules_data:
+  oss_dynamic_plugins_data:

@@ -77,6 +77,17 @@ const STATIC_MODULES: ModuleDef[] = [
       </div>
     ),
   },
+  {
+    id: "insurance",
+    name: "Insurance & Appraisals",
+    description: "Track policy coverage, scheduled items, and appraisal records for your collection.",
+    itemLabel: "policies",
+    iconEl: (
+      <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-sky-400 to-blue-600 flex items-center justify-center text-2xl select-none">
+        🛡️
+      </div>
+    ),
+  },
 ];
 
 /* ─── Fallback "Collections" card shown when user has no items ───── */
@@ -136,6 +147,28 @@ export default function DashboardView({
           },
         }));
       });
+    }
+
+    if (isModuleEnabled("insurance")) {
+      setStatsMap((prev) => ({
+        ...prev,
+        insurance: { ...EMPTY_STATS, loading: true, itemLabel: "policies" },
+      }));
+      api<{ policy_count: number; total_coverage: number }>(`/insurance/summary`)
+        .then((s) => {
+          setStatsMap((prev) => ({
+            ...prev,
+            insurance: {
+              loading: false,
+              itemLabel: "policies",
+              items: s.policy_count,
+              value: s.total_coverage,
+            },
+          }));
+        })
+        .catch(() => {
+          setStatsMap((prev) => ({ ...prev, insurance: { ...EMPTY_STATS, itemLabel: "policies" } }));
+        });
     }
 
     api<{ total_assets: number; total_estimated_value: number; categories: CategoryStat[] }>(

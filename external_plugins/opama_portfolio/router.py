@@ -2,18 +2,22 @@
 """
 Portfolio API router - exposes valuation and tracking endpoints.
 
+All endpoints operate on the authenticated user (derived from the auth
+token via get_current_user) - there is no user_id query/path param.
+
 Endpoints:
-- GET /portfolio/{user_id}/value - Current portfolio value
-- GET /portfolio/{user_id}/history - Historical values
-- GET /portfolio/{user_id}/breakdown - Breakdown by category
-- POST /portfolio/{user_id}/snapshot - Create manual snapshot
+- GET /portfolio/value - Current portfolio value
+- GET /portfolio/history - Historical values
+- GET /portfolio/breakdown - Breakdown by category
+- POST /portfolio/snapshot - Create manual snapshot
 
-- GET /portfolio/sales/{user_id} - List sales
+- GET /portfolio/sales - List sales
 - POST /portfolio/sales - Record a sale
-- GET /portfolio/sales/{user_id}/summary - Realized gains summary
+- DELETE /portfolio/sales/{sale_id} - Delete a sale
+- GET /portfolio/sales/summary - Realized gains summary
 
-- GET /portfolio/prices/{card_id} - Get/set market price
-- PUT /portfolio/prices - Update market price
+- GET /portfolio/prices/{card_id} - Get market price (public reference data)
+- PUT /portfolio/prices - Update market price (auth required)
 """
 
 from typing import Optional, List
@@ -27,7 +31,7 @@ from services.shared.database import get_session
 from services.shared.models import User
 from opama_pokemon_tcg.catalog.models import Card
 from opama_pokemon_tcg.inventory.models import InventoryItem
-from services.auth.middleware import get_optional_user
+from services.auth.middleware import get_current_user
 from .models import (
     MarketPrice,
     SaleTransaction,
@@ -65,14 +69,10 @@ router = APIRouter()
 def get_portfolio_value(
     use_purchase_prices: bool = Query(False, description="Use manual purchase prices instead of market"),
     session: Session = Depends(get_session),
-    current_user: Optional[User] = Depends(get_optional_user),
-    user_id: Optional[int] = Query(None, description="Demo mode: explicit user_id (ignored if authenticated)"),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Calculate current portfolio value for the authenticated user.
-
-    Authentication: Uses Firebase token to identify user.
-    Demo mode: Provide user_id query parameter for testing without auth.
 
     Combines inventory data with market prices (or manual purchase prices).
 
@@ -80,13 +80,7 @@ def get_portfolio_value(
         use_purchase_prices: If true, uses purchase_price from inventory
                            If false, uses market prices (with fallback to purchase_price)
     """
-    # Determine which user to query
-    target_user_id = current_user.id if current_user else user_id
-
-    if not target_user_id:
-        raise HTTPException(401, "Authentication required or provide user_id for demo mode")
-
-    portfolio_data = calculate_portfolio_value(target_user_id, session, use_purchase_prices)
+    portfolio_data = calculate_portfolio_value(current_user.id, session, use_purchase_prices)
 
     # Format breakdown for response
     breakdown = {}
@@ -132,24 +126,14 @@ def get_portfolio_value(
 def create_snapshot(
     snapshot_type: str = Query("manual", description="Snapshot type: manual, auto_daily, auto_weekly"),
     session: Session = Depends(get_session),
-    current_user: Optional[User] = Depends(get_optional_user),
-    user_id: Optional[int] = Query(None, description="Demo mode: explicit user_id (ignored if authenticated)"),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Create a point-in-time snapshot of portfolio value for the authenticated user.
 
-    Authentication: Uses Firebase token to identify user.
-    Demo mode: Provide user_id query parameter for testing without auth.
-
     Useful for tracking historical performance.
     """
-    # Determine which user to use
-    target_user_id = current_user.id if current_user else user_id
-
-    if not target_user_id:
-        raise HTTPException(401, "Authentication required or provide user_id for demo mode")
-
-    snapshot = create_portfolio_snapshot(target_user_id, session, snapshot_type)
+    snapshot = create_portfolio_snapshot(current_user.id, session, snapshot_type)
 
     return {
         "id": snapshot.id,
@@ -166,24 +150,14 @@ def create_snapshot(
 def get_history(
     days: int = Query(90, ge=1, le=365, description="Number of days of history"),
     session: Session = Depends(get_session),
-    current_user: Optional[User] = Depends(get_optional_user),
-    user_id: Optional[int] = Query(None, description="Demo mode: explicit user_id (ignored if authenticated)"),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Get historical portfolio values for the authenticated user.
 
-    Authentication: Uses Firebase token to identify user.
-    Demo mode: Provide user_id query parameter for testing without auth.
-
     Returns snapshots and summary statistics over the requested period.
     """
-    # Determine which user to query
-    target_user_id = current_user.id if current_user else user_id
-
-    if not target_user_id:
-        raise HTTPException(401, "Authentication required or provide user_id for demo mode")
-
-    history_data = get_portfolio_history(target_user_id, session, days)
+    history_data = get_portfolio_history(current_user.id, session, days)
 
     return PortfolioHistoryResponse(
         user_id=history_data["user_id"],
@@ -193,19 +167,20 @@ def get_history(
     )
 
 
-@router.get("/{user_id}/breakdown", response_model=PortfolioBreakdownResponse)
+@router.get("/breakdown", response_model=PortfolioBreakdownResponse)
 def get_breakdown(
-    user_id: int,
     group_by: str = Query("set", description="Group by: set, rarity, type, series"),
     top_n: int = Query(10, ge=1, le=50, description="Number of top groups to return"),
     session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     """
-    Get portfolio breakdown by category (set, rarity, type, or series).
+    Get portfolio breakdown by category (set, rarity, type, or series)
+    for the authenticated user.
 
     Useful for understanding portfolio composition and concentration.
     """
-    portfolio_data = calculate_portfolio_value(user_id, session)
+    portfolio_data = calculate_portfolio_value(current_user.id, session)
 
     # Group valuations by the requested dimension
     groups_dict = {}
@@ -257,7 +232,7 @@ def get_breakdown(
     groups = groups[:top_n]
 
     return PortfolioBreakdownResponse(
-        user_id=user_id,
+        user_id=current_user.id,
         group_by=group_by,
         total_value=total_value,
         groups=groups,
@@ -272,9 +247,11 @@ def get_breakdown(
 def record_sale(
     sale: CreateSaleRequest,
     session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     """
-    Record a card sale and calculate realized gain/loss.
+    Record a card sale and calculate realized gain/loss for the
+    authenticated user.
 
     Automatically calculates P&L based on inventory purchase price.
     """
@@ -283,11 +260,13 @@ def record_sale(
     if not card:
         raise HTTPException(404, f"Card {sale.card_id} not found")
 
-    # Get original cost from inventory if available
+    # Get original cost from inventory if available, and verify ownership
     original_cost = Decimal("0.00")
     if sale.inventory_item_id:
         inv_item = session.get(InventoryItem, sale.inventory_item_id)
-        if inv_item and inv_item.purchase_price_per_card:
+        if not inv_item or inv_item.user_id != current_user.id:
+            raise HTTPException(404, f"Inventory item {sale.inventory_item_id} not found")
+        if inv_item.purchase_price_per_card:
             original_cost = Decimal(str(inv_item.purchase_price_per_card)) * sale.quantity_sold
 
     # Calculate unit price and net proceeds
@@ -302,7 +281,7 @@ def record_sale(
 
     # Create transaction
     transaction = SaleTransaction(
-        user_id=sale.user_id,
+        user_id=current_user.id,
         card_id=sale.card_id,
         inventory_item_id=sale.inventory_item_id,
         quantity_sold=sale.quantity_sold,
@@ -359,25 +338,15 @@ def list_sales(
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     session: Session = Depends(get_session),
-    current_user: Optional[User] = Depends(get_optional_user),
-    user_id: Optional[int] = Query(None, description="Demo mode: explicit user_id (ignored if authenticated)"),
+    current_user: User = Depends(get_current_user),
 ):
     """
     List all sales for the authenticated user, ordered by sale date (newest first).
-
-    Authentication: Uses Firebase token to identify user.
-    Demo mode: Provide user_id query parameter for testing without auth.
     """
-    # Determine which user to query
-    target_user_id = current_user.id if current_user else user_id
-
-    if not target_user_id:
-        raise HTTPException(401, "Authentication required or provide user_id for demo mode")
-
     stmt = (
         select(SaleTransaction, Card)
         .join(Card, SaleTransaction.card_id == Card.id)
-        .where(SaleTransaction.user_id == target_user_id)
+        .where(SaleTransaction.user_id == current_user.id)
         .order_by(desc(SaleTransaction.sale_date))
         .limit(limit)
         .offset(offset)
@@ -410,6 +379,7 @@ def list_sales(
 def delete_sale(
     sale_id: int,
     session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Delete a sale transaction and restore the inventory quantity.
@@ -419,7 +389,7 @@ def delete_sale(
     """
     # Get the sale transaction
     sale = session.get(SaleTransaction, sale_id)
-    if not sale:
+    if not sale or sale.user_id != current_user.id:
         raise HTTPException(404, f"Sale transaction {sale_id} not found")
 
     # If this sale had an inventory item, restore the quantity
@@ -451,24 +421,14 @@ def delete_sale(
 def get_realized_gains_summary(
     days: Optional[int] = Query(None, ge=1, le=3650, description="Optional: limit to last N days"),
     session: Session = Depends(get_session),
-    current_user: Optional[User] = Depends(get_optional_user),
-    user_id: Optional[int] = Query(None, description="Demo mode: explicit user_id (ignored if authenticated)"),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Get summary of realized gains/losses from sales for the authenticated user.
 
-    Authentication: Uses Firebase token to identify user.
-    Demo mode: Provide user_id query parameter for testing without auth.
-
     Provides overall P&L statistics and identifies best/worst sales.
     """
-    # Determine which user to query
-    target_user_id = current_user.id if current_user else user_id
-
-    if not target_user_id:
-        raise HTTPException(401, "Authentication required or provide user_id for demo mode")
-
-    stmt = select(SaleTransaction).where(SaleTransaction.user_id == target_user_id)
+    stmt = select(SaleTransaction).where(SaleTransaction.user_id == current_user.id)
 
     # Optional date filter
     if days:
@@ -479,7 +439,7 @@ def get_realized_gains_summary(
 
     if not sales:
         return RealizedGainsSummary(
-            user_id=user_id,
+            user_id=current_user.id,
             total_sales=0,
             total_proceeds=Decimal("0.00"),
             total_fees=Decimal("0.00"),
@@ -527,7 +487,7 @@ def get_realized_gains_summary(
         worst_card = session.get(Card, worst_sale.card_id)
 
     return RealizedGainsSummary(
-        user_id=user_id,
+        user_id=current_user.id,
         period={"days": days} if days else None,
         total_sales=len(sales),
         total_proceeds=total_proceeds,
@@ -640,12 +600,14 @@ def get_market_price(
 def update_market_price(
     price_update: UpdateMarketPriceRequest,
     session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Update or set a manual price override for a card.
 
     Allows users to manually specify card values when market data is unavailable
-    or when they disagree with automated valuations.
+    or when they disagree with automated valuations. Requires authentication
+    since this writes to shared price data used by all users.
     """
     # Verify card exists
     card = session.get(Card, price_update.card_id)

@@ -95,6 +95,36 @@ Celery tasks (`check_and_sync_catalog`, `sync_single_set`) are merged into
 the host's `celery_app` via its plugin-discovery loop (`TASK_ROUTES` → queue
 `catalog`).
 
+## Baseline catalog dataset
+
+`catalog/data/baseline_catalog.ndjson.gz` ships a metadata-only snapshot of
+the Pokémon TCG catalog (169 sets / 19,500 cards as of 2026-06-14) — names,
+numbers, sets/series, rarity, types, attacks/abilities text, legality, etc.
+No card artwork is bundled: `image_small`/`image_large` are plain URL strings
+pointing at the official Pokémon TCG API's image CDN (or `null`), never local
+image files. This keeps the module copyright-safe — only structured game
+data ships, never scanned/owned card images.
+
+`catalog/seed.py`'s `seed_baseline_catalog()` loads this snapshot on first
+startup, only if the `Set` table is empty (`app/main.py`'s startup handler,
+gated on the `catalog` plugin being loaded). A fresh self-hosted install gets
+the full card catalog immediately — no API key or sync step required before
+using inventory/decks.
+
+### Keeping it current
+
+Pokémon TCG releases new sets continuously, so the bundled snapshot will go
+stale. Two paths, for two audiences:
+
+- **Self-hosters**: `POST /cards/sync/trigger` pulls new sets directly from
+  the live Pokémon TCG API and only adds sets not already present — composes
+  cleanly with the bundled baseline, no duplication.
+- **Maintainers**: re-run `scripts/export_baseline_catalog.py` against an
+  instance kept up to date via the above, to refresh
+  `baseline_catalog.ndjson.gz` for *future* installs. Tie this to
+  `CORE_VERSION` release points alongside `scripts/sync_oss_module.sh` (see
+  `docs/RELEASE_PROCESS.md`) — not a per-commit step.
+
 ## Status
 
 Extracted from `services/{catalog,inventory,decks,trading}/` into this
@@ -104,6 +134,10 @@ external-plugin package on 2026-06-13 and pushed to
 opama instance via `PLUGIN_PATHS` and the `opama_<id>` naming convention; see
 the host repo's `external_plugins/README.md` for how discovery and
 `sys.path` injection work.
+
+Development happens here, in the `opama` monorepo — the mirror repo is
+kept in sync via `scripts/sync_oss_module.sh pokemon_tcg` (see
+`external_plugins/README.md`).
 
 `pyproject.toml` documents this package's shape as a standalone install
 (`opama-pokemon-tcg`, pip-installable with `fastapi`/`sqlmodel`/`celery`/

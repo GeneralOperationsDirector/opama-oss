@@ -3,20 +3,28 @@
 This directory holds plugin code that physically lives outside `services/`,
 loaded at runtime via the `PLUGIN_PATHS` mechanism in `app/plugin_loader.py`.
 It exists as **prep work for the "repo split"** described in the open-source
-vision: eventually, premium modules (AI, …) will each live in their own GitHub
-repo (`opama-ai`, …) while still loading into the core opama backend at
-runtime. Pokémon TCG, Shopify, Storefront, and Card Grader have already made
-this move — see `opama_pokemon_tcg/`, `opama_shopify/`, `opama_storefront/`,
-and `opama_grading/` below.
+vision: opama-branded modules each live in their own GitHub repo while still
+loading into the core opama backend at runtime. Pokémon TCG, Shopify,
+Storefront, Card Grader, Portfolio, and AI Assistant have already made this
+move — see `opama_pokemon_tcg/`, `opama_shopify/`, `opama_storefront/`,
+`opama_grading/`, `opama_portfolio/`, and `opama_ai/` below.
 
-**No new repos have been created yet.** This directory proves the *loading
-mechanism* works — `opama_marketplace/` (see below) was the original
-same-repo `git mv` proof-of-concept and has since moved on to become a real
-standalone premium plugin in its own private repo (no longer present in this
-tree; its shape is kept below for illustration). When the time comes to
-actually split a plugin into its own repo, the work becomes mechanical: copy
-a directory like this one out, `pip install` or git-clone it somewhere
-reachable, and point `PLUGIN_PATHS` at it.
+Each of these 6 directories is also mirrored to its own GitHub repo under
+`github.com/GeneralOperationsDirector/`:
+
+| Directory | Mirror repo |
+|---|---|
+| `opama_pokemon_tcg/` | `opama-oss-pokemon` |
+| `opama_shopify/` | `opama-oss-shopify` |
+| `opama_storefront/` | `opama-oss-storefront` |
+| `opama_grading/` | `opama-oss-card-grader` |
+| `opama_portfolio/` | `opama-oss-portfolio` |
+| `opama_ai/` | `opama-oss-ai-assistant` |
+
+`opama_marketplace/` (see below) was the original same-repo `git mv`
+proof-of-concept and has since moved on to become a real standalone premium
+plugin in its own private repo (no longer present in this tree; its shape is
+kept below for illustration).
 
 ## How discovery works (`PLUGIN_PATHS`)
 
@@ -46,6 +54,25 @@ is `opama_marketplace`, matching what a `github.com/<owner>/opama-marketplace`
 repo would ship. `router_module` and `model_modules` in `plugin.yaml` reference this
 dotted package path (e.g. `opama_marketplace.router`), exactly like in-repo
 plugins reference `services.<id>.router`.
+
+## Development workflow for the opama-branded modules
+
+The 6 modules listed above are first-party "opama branded" modules — unlike
+`opama_marketplace` (an arms-length premium plugin in its own private repo),
+they ship as part of every opama installation. Their mirror repos
+(`opama-oss-*`, table above) do **not** make them independently-developed:
+
+- **Development happens here**, in this monorepo's `external_plugins/opama_<id>/`
+  — same hot-reload bind-mount as any other plugin (`docker-compose.yml`'s
+  `PLUGIN_PATHS` default).
+- The `opama-oss-*` mirror repos exist for focused issue tracking / external
+  visibility into a single module, and as the source the public core repo
+  (`opama-oss-prelaunch`) bundles from — `opama-oss-prelaunch` ships
+  `external_plugins/<module>/` directly, the same way this repo does.
+- Mirrors are kept up to date with `scripts/sync_oss_module.sh <id>`, run by
+  a maintainer at release points (see `docs/RELEASE_PROCESS.md`), not on
+  every commit. The script never force-pushes or rewrites history — it stages
+  an additive "sync" commit in a local clone and prints the review/push step.
 
 ## Reference example: `opama_marketplace/` (moved)
 
@@ -217,24 +244,31 @@ the old directory once it's no longer referenced.
 
 ## What's still open before an actual repo extraction
 
-This prep proves the *loader* can load a plugin from outside `services/`. It
-does **not** yet decide:
+This prep proves the *loader* can load a plugin from outside `services/`.
+For the 6 opama-branded modules, two of the three original open questions are
+now resolved by the "Development workflow" section above:
 
 - **Distribution channel for plugins that ship *with* an installation** —
-  how would `opama-pokemon` et al. actually reach a user's
-  `external_plugins/`-equivalent directory at install/setup time? Candidates:
-  git submodule, `pip install` from a private index / git URL. (The *runtime*
-  add-a-plugin-later channel is now answered — see "Dynamic local installs"
-  above — but that's a different moment in a plugin's lifecycle than "this
-  ships as part of opama itself".) `pyproject.toml` here documents the
-  package shape but isn't yet exercised by `pip` — opama loads it via
-  directory discovery, not installation.
+  **resolved** for these 6: they ship as part of `external_plugins/` in both
+  this repo and `opama-oss-prelaunch`, kept in sync via
+  `scripts/sync_oss_module.sh`. git submodule / `pip install` from a private
+  index remain open only for a self-hoster who wants to *replace* one of
+  these 6 with their own fork — not needed for the bundled-by-default case.
+  (The *runtime* add-a-plugin-later channel is separately answered — see
+  "Dynamic local installs" above.)
+- **CI** — **resolved as "not needed for mirrors"**: the `opama-oss-*` repos
+  are synced snapshots with no independent code path, so CI continues to run
+  only in this monorepo. If a mirror repo ever starts accepting its own PRs
+  (truly independent development), it gets its own CI at that point.
+
+Still open:
+
 - **Version pinning** — how a host pins/upgrades an external (`PLUGIN_PATHS`)
   plugin to a specific version once it's not just a subdirectory of this repo.
   (Dynamic local installs sidestep this — they're DB-versioned and
-  GC-managed; see above.)
-- **CI** — how externally-developed plugins get tested against opama-core
-  without living in this repo's test suite.
-
-These are deliberately deferred — solving them doesn't unblock anything else,
-and the answers may depend on how the marketplace/distribution model evolves.
+  GC-managed; see above.) The *other* direction — a plugin declaring which
+  opama core versions it's compatible with — is now answered by
+  `requires_core` in `plugin.yaml`; see
+  [docs/RELEASE_PROCESS.md](../docs/RELEASE_PROCESS.md). Pinning a plugin to
+  one of its own releases remains open and is independent of the
+  branded-module sync workflow above.

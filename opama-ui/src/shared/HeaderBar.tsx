@@ -1,7 +1,7 @@
 import React from "react";
 import { motion } from "motion/react";
 import {
-  Database, Package, Layers, Images, Repeat, Heart,
+  Database, Package, Layers, Repeat, Heart,
   ShoppingCart, BookOpen, TrendingUp, LogIn, LogOut,
   User as UserIcon, LayoutDashboard, Swords, Settings,
 } from "lucide-react";
@@ -29,15 +29,16 @@ function StatusDot() {
   );
 }
 
+// Showcase, Portfolio, and eBay are intentionally not in this nav — their
+// tab components (ShowcaseTab, PortfolioTab, EbayTab) and OpamaApp.tsx render
+// blocks are kept as-is for the planned Themed Portfolios / skins integration
+// with the core Opama Portfolio module (see opama_pokemon_tcg module work).
 const POKEMON_TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: "catalog",   label: "Catalog",   icon: <Database     className="w-3.5 h-3.5" /> },
   { id: "inventory", label: "Inventory", icon: <Package      className="w-3.5 h-3.5" /> },
   { id: "decks",     label: "Decks",     icon: <Layers       className="w-3.5 h-3.5" /> },
-  { id: "showcase",  label: "Showcase",  icon: <Images       className="w-3.5 h-3.5" /> },
-  { id: "portfolio", label: "Portfolio", icon: <TrendingUp   className="w-3.5 h-3.5" /> },
   { id: "trade",     label: "Trade",     icon: <Repeat       className="w-3.5 h-3.5" /> },
   { id: "wishlist",  label: "Wish List", icon: <Heart        className="w-3.5 h-3.5" /> },
-  { id: "ebay",      label: "eBay",      icon: <ShoppingCart className="w-3.5 h-3.5" /> },
   { id: "pokedex",   label: "Pokédex",   icon: <BookOpen     className="w-3.5 h-3.5" /> },
 ];
 

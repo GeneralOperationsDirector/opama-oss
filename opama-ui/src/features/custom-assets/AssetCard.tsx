@@ -1,6 +1,7 @@
 import React from "react";
 import { Pencil, Trash2, TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { API_BASE } from "../../lib/api";
+import AddToShowcaseButton from "../showcase/AddToShowcaseButton";
 import type { CustomAsset } from "./types";
 
 function fmt(n: number | null | undefined) {
@@ -10,12 +11,14 @@ function fmt(n: number | null | undefined) {
 
 interface Props {
   asset: CustomAsset;
+  userId: number;
   onEdit: () => void;
   onDelete: () => void;
   onOpen: () => void;
+  onToast?: (msg: string, type?: "success" | "error" | "info") => void;
 }
 
-export default function AssetCard({ asset, onEdit, onDelete, onOpen }: Props) {
+export default function AssetCard({ asset, userId, onEdit, onDelete, onOpen, onToast }: Props) {
   const gain =
     asset.estimated_value != null && asset.purchase_price != null
       ? (asset.estimated_value - asset.purchase_price) * asset.quantity
@@ -100,6 +103,12 @@ export default function AssetCard({ asset, onEdit, onDelete, onOpen }: Props) {
         >
           <Trash2 className="w-3 h-3" /> Delete
         </button>
+        <AddToShowcaseButton
+          userId={userId}
+          cardId={String(asset.id)}
+          onSuccess={(title) => onToast?.(`Added to "${title}"`, "success")}
+          onError={(msg) => onToast?.(msg, "error")}
+        />
       </div>
     </div>
   );

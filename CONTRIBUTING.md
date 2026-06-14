@@ -65,8 +65,14 @@ cd opama-ui && npx tsc --noEmit
 - Follow the conventions documented in [CLAUDE.md](CLAUDE.md) — dependency-injected
   DB sessions, static-before-dynamic routes, ownership checks, validated uploads.
 - Commit messages: `feat|fix|chore|docs|test: short summary`.
-- Building a new module/plugin? Start with
-  [docs/MODULE_DEVELOPMENT.md](docs/MODULE_DEVELOPMENT.md).
+- Building a new module/plugin? Run
+  `python3 scripts/new_module.py <id>` to scaffold one, or start with
+  [docs/MODULE_DEVELOPMENT.md](docs/MODULE_DEVELOPMENT.md) for the full
+  walkthrough. Modules that ship with core and get their own `opama-oss-*`
+  mirror repo follow the workflow in
+  [external_plugins/README.md](external_plugins/README.md#development-workflow-for-the-opama-branded-modules).
+- Versioning and what counts as a breaking change for module/plugin authors
+  is documented in [docs/RELEASE_PROCESS.md](docs/RELEASE_PROCESS.md).
 
 ## Pull requests
 

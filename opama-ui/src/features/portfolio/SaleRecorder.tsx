@@ -91,7 +91,6 @@ export default function SaleRecorder({ userId, onToast, onSaleRecorded }: SaleRe
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          user_id: userId,
           card_id: formData.card_id,
           inventory_item_id: formData.inventory_item_id ? parseInt(formData.inventory_item_id) : null,
           quantity_sold: formData.quantity_sold,

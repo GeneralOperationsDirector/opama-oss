@@ -180,8 +180,8 @@ export default function MainPortfolioView({
     setError(null);
     try {
       const [pokRes, colRes] = await Promise.allSettled([
-        api<PortfolioValue>(`/portfolio/value?user_id=${userId}`),
-        api<CollectionsSummary>(`/assets/summary?user_id=${userId}`),
+        api<PortfolioValue>(`/portfolio/value`),
+        api<CollectionsSummary>(`/assets/summary`),
       ]);
       setData({
         pokemon: pokRes.status === "fulfilled" ? pokRes.value : null,

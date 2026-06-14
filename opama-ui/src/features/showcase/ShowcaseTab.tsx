@@ -365,7 +365,7 @@ export default function ShowcaseTab({ userId, onOpenDetails, onToast }: Showcase
                     )}
 
                     <CardTile
-                      cardLike={item.card || { id: item.card_id, name: item.card_id, set_id: "" }}
+                      cardLike={item.card || { id: item.card_id, name: item.card_id }}
                       onOpenDetails={onOpenDetails}
                       fallbackId={item.card_id}
                       right={

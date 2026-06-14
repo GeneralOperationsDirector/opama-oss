@@ -4,6 +4,7 @@
 !Dockerfile
 !docker-compose.yml
 !requirements.txt
+!registry.json
 !app/
 !services/
 !external_plugins/

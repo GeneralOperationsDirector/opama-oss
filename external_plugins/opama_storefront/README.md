@@ -62,6 +62,10 @@ extractions, and pushed to
 opama instance via `PLUGIN_PATHS` and the `opama_<id>` naming convention; see
 the host repo's `external_plugins/README.md`.
 
+Development happens here, in the `opama` monorepo — the mirror repo is
+kept in sync via `scripts/sync_oss_module.sh storefront` (see
+`external_plugins/README.md`).
+
 `pyproject.toml` documents this package's shape as a standalone install
 (`opama-storefront`) — not yet exercised by the host's loader, which uses
 directory discovery rather than `pip install`.

@@ -50,6 +50,7 @@ from services.auth import router as auth_router, init_firebase_admin
 
 # --- Plugin loader -------------------------------------------------------
 from app.plugin_loader import discover_plugins, resolve_enabled, load_plugin_models, load_plugins, load_dynamic_plugins, record_loaded_ids
+from app.version import CORE_VERSION
 
 # Discover and filter plugins before creating the app so router
 # registration happens at module level (same as the old hardcoded imports).
@@ -62,6 +63,7 @@ load_plugin_models(_enabled_plugins)
 # --- App -----------------------------------------------------------------
 app = FastAPI(
     title="opama API",
+    version=CORE_VERSION,
     description="Open Personal Asset Management — plugin-based API",
 )
 
@@ -169,6 +171,17 @@ def _startup() -> None:
     else:
         init_db()
         log.info("🗄️  Database initialised")
+
+        # Fast-start: seed the bundled Pokémon TCG catalog snapshot on a
+        # fresh, empty database. No-op if Set already has rows (including
+        # one populated via POST /cards/sync/trigger before this runs).
+        if "catalog" in loaded_ids:
+            from opama_pokemon_tcg.catalog.seed import seed_baseline_catalog
+
+            with Session(engine) as _session:
+                _seeded = seed_baseline_catalog(_session)
+            if _seeded:
+                log.info(f"🌱 Seeded baseline Pokémon TCG catalog: {_seeded[0]} sets, {_seeded[1]} cards")
 
         # Load remote plugins persisted in the dynamic_plugins table.
         # These were installed via POST /plugin-store/install and become

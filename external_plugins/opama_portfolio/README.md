@@ -55,6 +55,10 @@ Relocated from `services/portfolio/` (full history preserved via `git mv`) on
 Storefront, and Card Grader extractions. Pushed as a single-commit snapshot to
 `git@github.com:GeneralOperationsDirector/opama-oss-portfolio.git` `main`.
 
+Development happens here, in the `opama` monorepo — the mirror repo is
+kept in sync via `scripts/sync_oss_module.sh portfolio` (see
+`external_plugins/README.md`).
+
 `pyproject.toml` documents this package's shape as a standalone install
 (`opama-portfolio`) — not yet exercised by the host's loader, which uses
 directory discovery rather than `pip install`.

@@ -109,6 +109,8 @@ model_modules:                 # SQLModel table modules to import before
   - services.my_module.models  # init_db() — see table above for restrictions
 requires:                       # other plugin ids this module depends on
   - auth
+requires_core: ">=0.1.0,<0.2.0" # optional — opama core versions this module
+                                # is compatible with (PEP 440 specifier)
 
 # --- type: remote fields (mutually exclusive with the above) ---
 # remote_url: https://my-vendor.example.com
@@ -119,6 +121,13 @@ requires:                       # other plugin ids this module depends on
 `requires:` is documentation/dependency-ordering metadata — `services/auth`
 and `services/shared` (auth middleware, DB session, base models) are implicit
 dependencies of almost everything.
+
+`requires_core` is optional; if omitted, the module is treated as compatible
+with every core version. If set and the running core's
+[`CORE_VERSION`](../app/version.py) doesn't satisfy it, the module is logged
+and excluded at discovery rather than crashing startup. See
+[RELEASE_PROCESS.md](RELEASE_PROCESS.md) for the versioning policy, what
+counts as a breaking change, and the recommended `requires_core` range.
 
 ---
 
@@ -315,6 +324,12 @@ zero-migration place to put a settings blob. Use (A), (B), or (C).
 ---
 
 ## 5. Worked example: a minimal "Hello" module
+
+> **Shortcut:** `python3 scripts/new_module.py hello --name "Hello Module"`
+> generates exactly the files below (plugin.yaml, `__init__.py`, router.py,
+> models.py), including a `requires_core` range computed from the current
+> [`CORE_VERSION`](../app/version.py). The steps that follow are what it
+> generates, spelled out.
 
 1. **Create the directory and manifest:**
 

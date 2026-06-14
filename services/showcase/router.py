@@ -1,11 +1,13 @@
 """
-Showcase Service - Card Collection Management
+Showcase Service - Collection Showcases
 ----------------------------------------------
 CRUD endpoints for user showcases and showcase cards.
 
-Similar to Decks service but for general card collections/playlists.
-Users can create named showcases (e.g., "Full Art Cards", "For Trade")
-and add any cards to them. Showcases can be public or private.
+Similar to Decks service but for general collections/playlists. Users can
+create named showcases (e.g., "Full Art Cards", "For Trade") and add any
+item to them - a CustomAsset from their Collections (always available), or,
+if the optional opama_pokemon_tcg plugin is installed, a Pokémon TCG catalog
+card. Showcases can be public or private.
 
 Endpoints:
 - List showcases (with optional public filter)
@@ -21,11 +23,87 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 from services.shared.database import get_session
 from services.shared.models import User
-from opama_pokemon_tcg.catalog.models import Card
+from services.custom_assets.models import CustomAsset
 from services.showcase.models import Showcase, ShowcaseCard
 from services.auth.middleware import get_current_user, get_optional_user
 
+try:
+    from opama_pokemon_tcg.catalog.models import Card
+except ImportError:
+    Card = None
+
 router = APIRouter()
+
+
+# ---------------------------------------------------------------------------
+# Card/asset resolution helpers
+# ---------------------------------------------------------------------------
+
+
+def _verify_card_exists(session: Session, card_id: str, current_user: User) -> None:
+    """Raise 404/403 unless card_id resolves to a reference the user may add.
+
+    CustomAsset ids are integers (stringified), so a purely numeric card_id
+    is checked against the user's own collection first. Pokémon TCG catalog
+    card ids are hyphenated strings (e.g. "sv9-12a") and are global/public,
+    so no ownership check applies to them.
+    """
+    if card_id.isdigit():
+        asset = session.get(CustomAsset, int(card_id))
+        if asset:
+            if asset.user_id != current_user.id:
+                raise HTTPException(403, "Cannot add another user's item to a showcase")
+            return
+
+    if Card is not None and session.get(Card, card_id):
+        return
+
+    raise HTTPException(404, f"Item {card_id} not found")
+
+
+def _hydrate_card_map(session: Session, card_ids: List[str]) -> dict:
+    """Batch-resolve showcase card_ids against CustomAsset and, if the
+    opama_pokemon_tcg plugin is installed, the Pokémon TCG catalog.
+
+    Returns a dict keyed by card_id with a unified shape:
+    id, name, set_id, number, image_small, image_large, rarity, category,
+    source ("asset" | "catalog"). Avoids N+1 queries.
+    """
+    result: dict = {}
+    if not card_ids:
+        return result
+
+    asset_ids = [int(cid) for cid in card_ids if cid.isdigit()]
+    if asset_ids:
+        for a in session.exec(select(CustomAsset).where(CustomAsset.id.in_(asset_ids))).all():
+            result[str(a.id)] = {
+                "id": str(a.id),
+                "name": a.name,
+                "set_id": None,
+                "number": None,
+                "image_small": a.image_thumb_url or a.image_url,
+                "image_large": a.image_url,
+                "rarity": None,
+                "category": a.category,
+                "source": "asset",
+            }
+
+    remaining = [cid for cid in card_ids if cid not in result]
+    if remaining and Card is not None:
+        for c in session.exec(select(Card).where(Card.id.in_(remaining))).all():
+            result[c.id] = {
+                "id": c.id,
+                "name": c.name,
+                "set_id": c.set_id,
+                "number": c.number,
+                "image_small": c.image_small,
+                "image_large": c.image_large,
+                "rarity": c.rarity,
+                "category": "Pokémon TCG",
+                "source": "catalog",
+            }
+
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -156,17 +234,12 @@ def get_showcase(
         .order_by(ShowcaseCard.added_at.desc())
     ).all()
 
-    # Batch-hydrate cards (avoid N+1 queries)
+    # Batch-hydrate cards/assets (avoid N+1 queries)
     card_ids = list({sc.card_id for sc in showcase_cards})
-    cards = {}
-    if card_ids:
-        cards = {
-            c.id: c for c in session.exec(select(Card).where(Card.id.in_(card_ids))).all()
-        }
+    cards = _hydrate_card_map(session, card_ids)
 
     hydrated = []
     for sc in showcase_cards:
-        c = cards.get(sc.card_id)
         hydrated.append({
             "id": sc.id,
             "showcase_id": sc.showcase_id,
@@ -174,15 +247,7 @@ def get_showcase(
             "quantity": sc.quantity,
             "notes": sc.notes,
             "added_at": sc.added_at,
-            "card": {
-                "id": c.id,
-                "name": c.name,
-                "set_id": c.set_id,
-                "number": c.number,
-                "rarity": c.rarity,
-                "image_small": c.image_small,
-                "image_large": c.image_large,
-            } if c else None
+            "card": cards.get(sc.card_id),
         })
 
     return {
@@ -311,9 +376,8 @@ def add_showcase_card(
     if showcase.user_id != current_user.id:
         raise HTTPException(403, "Cannot add cards to another user's showcase")
 
-    # Verify card exists
-    if not session.get(Card, payload.card_id):
-        raise HTTPException(404, f"Card {payload.card_id} not found")
+    # Verify the referenced item exists and is accessible to this user
+    _verify_card_exists(session, payload.card_id, current_user)
 
     # Check if card already in showcase
     existing = session.exec(
@@ -473,31 +537,18 @@ def get_public_showcases(
             .order_by(ShowcaseCard.added_at.desc())
         ).all()
 
-        # Hydrate cards
-        card_ids = [sc.card_id for sc in showcase_cards]
-        cards = {}
-        if card_ids:
-            cards = {
-                c.id: c for c in session.exec(select(Card).where(Card.id.in_(card_ids))).all()
-            }
+        # Hydrate cards/assets
+        card_ids = list({sc.card_id for sc in showcase_cards})
+        cards = _hydrate_card_map(session, card_ids)
 
         hydrated = []
         for sc in showcase_cards:
-            c = cards.get(sc.card_id)
             hydrated.append({
                 "id": sc.id,
                 "card_id": sc.card_id,
                 "quantity": sc.quantity,
                 "notes": sc.notes,
-                "card": {
-                    "id": c.id,
-                    "name": c.name,
-                    "set_id": c.set_id,
-                    "number": c.number,
-                    "rarity": c.rarity,
-                    "image_small": c.image_small,
-                    "image_large": c.image_large,
-                } if c else None
+                "card": cards.get(sc.card_id),
             })
 
         result.append({

@@ -29,6 +29,10 @@ data.db
 *.sqlite
 var/
 data/
+# ...except the bundled Pokémon TCG baseline catalog snapshot (committed —
+# see external_plugins/opama_pokemon_tcg/README.md#baseline-catalog-dataset)
+!external_plugins/opama_pokemon_tcg/catalog/data/
+!external_plugins/opama_pokemon_tcg/catalog/data/**
 
 # Node / Frontend
 node_modules/

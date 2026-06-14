@@ -109,8 +109,7 @@ class PortfolioBreakdownResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 class CreateSaleRequest(BaseModel):
-    """Request to record a card sale."""
-    user_id: int
+    """Request to record a card sale. user_id is derived from the auth token."""
     card_id: str
     inventory_item_id: Optional[int] = None
 

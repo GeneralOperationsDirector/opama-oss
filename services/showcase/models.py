@@ -59,8 +59,11 @@ class ShowcaseCard(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     showcase_id: int = Field(foreign_key="showcase.id", index=True)
-    # Soft reference: `card` lives in the optional opama_pokemon_tcg external
-    # plugin and may not exist in this deployment's schema (e.g. core-only installs).
+    # Soft reference, no DB-level FK. Resolved at read time by
+    # services.showcase.router._hydrate_card_map() against either:
+    #   - CustomAsset.id (core, stringified int) — the primary path, or
+    #   - opama_pokemon_tcg's catalog Card.id (string), if that optional
+    #     plugin is installed.
     card_id: str = Field(index=True)
     quantity: int = Field(default=1, ge=1)
     notes: Optional[str] = None

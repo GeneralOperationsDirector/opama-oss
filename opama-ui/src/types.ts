@@ -1,6 +1,6 @@
 // Shared types used across tabs/components
 
-export type AppModule = "dashboard" | "pokemon" | "custom" | "portfolio" | "grading" | "storefront" | "system" | "plugin_store";
+export type AppModule = "dashboard" | "pokemon" | "custom" | "portfolio" | "grading" | "storefront" | "system" | "plugin_store" | "insurance";
 
 export type PokemonTab = "catalog" | "inventory" | "decks" | "showcase" | "wishlist" | "trade" | "suggest" | "ebay" | "pokedex" | "portfolio";
 
@@ -213,11 +213,13 @@ export interface ShowcaseCardItem {
   card?: {
     id: string;
     name: string;
-    set_id: string;
+    set_id?: string | null;
     number?: string | null;
     rarity?: string | null;
     image_small?: string | null;
     image_large?: string | null;
+    category?: string | null;
+    source?: "asset" | "catalog";
   } | null;
 }
 

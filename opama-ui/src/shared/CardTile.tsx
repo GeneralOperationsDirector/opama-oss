@@ -20,6 +20,7 @@
  */
 
 import React, { useMemo, useState } from "react";
+import { API_BASE } from "../lib/api";
 
 export type CardLike = {
   id: string;
@@ -29,11 +30,19 @@ export type CardLike = {
   image_small?: string | null;
   image_large?: string | null;
   rarity?: string | null;
+  category?: string | null;
 };
+
+/** Uploaded asset images are stored as relative `/uploads/...` paths and
+ *  must be resolved against the API host before rendering. */
+function resolveImageUrl(url: string | null): string | null {
+  if (!url) return null;
+  return url.startsWith("/") ? `${API_BASE}${url}` : url;
+}
 
 /** Best-effort image URL derivation with local-first strategy:
  *  1) Try local images from /img/{set_id}_clean/{set_id}-{number}.png
- *  2) Fall back to explicit DB URLs if present
+ *  2) Fall back to explicit DB URLs if present (resolving relative /uploads/ paths)
  *  3) Fall back to remote API URLs
  *  4) Derive set/num from an id like "sv9-12a" if needed
  */
@@ -55,8 +64,8 @@ function getCardImageUrls(card: CardLike) {
   }
 
   // Priority 2: Database URLs
-  const dbSmall = card.image_small?.trim() || null;
-  const dbLarge = card.image_large?.trim() || null;
+  const dbSmall = resolveImageUrl(card.image_small?.trim() || null);
+  const dbLarge = resolveImageUrl(card.image_large?.trim() || null);
   if (dbSmall || dbLarge) return { small: dbSmall ?? dbLarge, large: dbLarge ?? dbSmall };
 
   // Priority 3: Remote API fallback
@@ -126,7 +135,7 @@ export default function CardTile({
             <div className="text-xs text-slate-500 truncate">
               {cardLike.set_id
                 ? `${cardLike.set_id} • ${cid}${cardLike.number ? ` • #${cardLike.number}` : ""}`
-                : cid}
+                : cardLike.category || cid}
             </div>
             {cardLike.rarity && <div className="text-xs text-slate-500 mt-0.5">{cardLike.rarity}</div>}
             {/* Optional badges/metadata injected by parent */}
