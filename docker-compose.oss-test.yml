@@ -1,0 +1,121 @@
+# docker-compose.oss-test.yml — isolated stack for testing the open-source (core-only) edition
+#
+# Runs entirely alongside the main dev stack — separate project name, containers, ports,
+# network, and Postgres volume. Starting/stopping/wiping this stack never touches
+# opama-postgres / opama-backend / opama-frontend or your existing data.
+#
+# The backend loads ONLY the core (open-source-tier) plugins, and the frontend shows
+# only the matching nav modules — this is what a self-hosted OSS user would see on a
+# brand-new install with an empty database.
+#
+# Usage:
+#   docker compose -f docker-compose.oss-test.yml up -d
+#   docker compose -f docker-compose.oss-test.yml down       # stop (keeps the test DB)
+#   docker compose -f docker-compose.oss-test.yml down -v    # stop + wipe the fresh test DB
+#
+# URLs:
+#   OSS Dashboard:  http://localhost:5174
+#   OSS API:        http://localhost:6001
+#   API Docs:       http://localhost:6001/docs
+
+name: opama-oss
+
+services:
+  backend:
+    build: .
+    container_name: opama-oss-backend
+    restart: unless-stopped
+    ports:
+      - "6001:8000"
+    env_file:
+      - .env.local
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://opama_user:opama_dev_pass@postgres:5432/opama_dev}
+      REDIS_HOST: redis
+      # Core (open-source-tier) plugins only — auth is always loaded regardless.
+      ENABLED_PLUGINS: custom_assets,integrations,licensing,plugin_store,system
+      OPAMA_LICENSE_KEY: ""
+      # This stack is the designated test bed for local-account auth (overrides
+      # the firebase pin in .env.local — see auth_provider_plan memory).
+      AUTH_PROVIDER: local
+      # Throwaway signing secret for this disposable test stack ONLY — never
+      # reuse it; real installs get a generated secret from ./opama.sh setup.
+      LOCAL_AUTH_SECRET: "oss-test-stack-throwaway-secret-do-not-reuse"
+      PYTHONPATH: /app/pip-modules:/app
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: >
+      sh -c "pip install -r /app/requirements-modules.txt --target /app/pip-modules -q 2>/dev/null || true
+      && alembic upgrade head
+      && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    volumes:
+      - ./app:/app/app
+      - ./services:/app/services
+      - ./uploads_oss_test:/app/uploads
+      - oss_pip_modules_data:/app/pip-modules
+      - ./requirements-modules.txt:/app/requirements-modules.txt
+      - ./alembic:/app/alembic
+      - ./alembic.ini:/app/alembic.ini
+      - ./registry.json:/app/registry.json
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/healthz"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 90s
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: opama-oss-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-opama}
+      POSTGRES_USER: ${POSTGRES_USER:-opama}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    ports:
+      - "5435:5432"
+    volumes:
+      - oss_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-opama} -d ${POSTGRES_DB:-opama}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  frontend:
+    image: node:22-alpine
+    container_name: opama-oss-frontend
+    working_dir: /app
+    volumes:
+      - ./opama-ui:/app
+      - oss_frontend_node_modules:/app/node_modules
+    command: sh -c "npm install --prefer-offline && npm run dev"
+    ports:
+      - "5174:5173"
+    environment:
+      VITE_API_TARGET: http://backend:8000
+      # Matches the core-tier modules in moduleRegistry.ts.
+      VITE_ENABLED_MODULES: dashboard,custom,system,plugin_store
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: opama-oss-redis
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  oss_postgres_data:
+  oss_frontend_node_modules:
+  oss_pip_modules_data:

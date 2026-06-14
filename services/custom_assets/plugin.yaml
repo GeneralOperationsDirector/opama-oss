@@ -1,0 +1,13 @@
+id: custom_assets
+name: Collections
+version: 1.0.0
+tier: core
+description: Manage any type of personal asset or collectible (core module)
+icon: "📦"
+api_prefix: ""
+tags: [custom-assets]
+router_module: services.custom_assets.router
+model_modules:
+  - services.custom_assets.models
+requires:
+  - auth

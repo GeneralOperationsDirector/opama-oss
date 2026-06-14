@@ -1,0 +1,12 @@
+id: integrations
+name: Integrations
+version: 1.0.0
+tier: core
+description: External data integrations (OpenClaw and webhook endpoints)
+icon: "🔗"
+api_prefix: ""
+tags: [openclaw]
+router_module: services.integrations.router
+model_modules: []
+requires:
+  - auth

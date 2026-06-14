@@ -1,0 +1,20 @@
+# ── Ignore everything by default ──
+*
+# ── Then include only what we need for the image ──
+!Dockerfile
+!docker-compose.yml
+!requirements.txt
+!app/
+!services/
+!external_plugins/
+!opama-ui/package*.json
+!opama-ui/src/
+!dist/
+# (If you have other static assets like images, add them here)
+
+# ── Exclude heavy dev artefacts ──
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/

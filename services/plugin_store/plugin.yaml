@@ -1,0 +1,14 @@
+id: plugin_store
+name: Plugin Store
+version: "1.0.0"
+tier: core
+description: "Community plugin marketplace — browse, install, and manage remote plugins."
+icon: "🧩"
+api_prefix: ""
+tags:
+  - plugin-store
+router_module: services.plugin_store.router
+model_modules:
+  - services.plugin_store.models
+requires:
+  - auth

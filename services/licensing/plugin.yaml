@@ -1,0 +1,10 @@
+id: licensing
+name: License
+version: "1.0.0"
+tier: core
+description: "License validation and status endpoint."
+icon: "🔑"
+router_module: services.licensing.router
+api_prefix: /license
+tags:
+  - license

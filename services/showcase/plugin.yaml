@@ -1,0 +1,13 @@
+id: showcase
+name: Card Showcases
+version: 1.0.0
+tier: premium
+description: Curated public and private card collections
+icon: "🖼️"
+api_prefix: /showcases
+tags: [showcases]
+router_module: services.showcase.router
+model_modules: [services.showcase.models]
+requires:
+  - auth
+  - catalog

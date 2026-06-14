@@ -1,0 +1,13 @@
+id: inventory
+name: Pokémon Inventory
+version: 1.0.0
+tier: premium
+description: Track owned Pokémon cards with condition, grading, and purchase history
+icon: "📦"
+api_prefix: /inventory
+tags: [inventory]
+router_module: opama_pokemon_tcg.inventory.router
+model_modules: [opama_pokemon_tcg.inventory.models]
+requires:
+  - auth
+  - catalog

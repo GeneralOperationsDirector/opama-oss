@@ -1,0 +1,92 @@
+# Environment / secrets — never commit these
+.env
+.env.local
+.env.*.local
+*.env
+service-account*.json
+firebase-adminsdk*.json
+google-credentials*.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+.Python
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Database / generated data
+data.db
+*.sqlite3
+*.sqlite
+var/
+data/
+
+# Node / Frontend
+node_modules/
+opama-ui/dist/
+opama-ui/.vite/
+opama-ui/node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
+
+# Docker volumes / local state
+postgres-data/
+redis-data/
+
+# Database backups
+backups/
+*.db.backup*
+
+# Legacy / scratch files
+repo.mirror/
+services-soa/
+firestore_mock.json/
+grab.txt
+api.txt
+assets/
+dist/
+
+# Old docker-compose variants
+docker-compose.*.old
+# Large binary image assets — excluded from git
+# Serve via CDN, Git LFS, or copy manually from another source
+opama-ui/public/img/
+uploads/
+uploads_oss_test/
+# Runtime-downloaded type=local plugin packages (app/plugin_installer.py) —
+# never git-tracked; deliberately separate from external_plugins/ (see its
+# module docstring for why mixing the two would risk vanishing-on-rebuild)
+dynamic_plugins/
+
+# Grading test fixtures (copyrighted card scans — supply your own locally)
+services/grading/test_data/
+
+# Premium plugin — lives in its own private repo, kept locally for dev
+external_plugins/opama_marketplace/
+OSS_READINESS_REPORT.md
+
+# License signing key — never commit
+license_signing_key.pem
+*.pem

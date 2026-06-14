@@ -1,0 +1,13 @@
+id: decks
+name: Deck Builder
+version: 1.0.0
+tier: premium
+description: Build and manage Pokémon TCG decks with format validation
+icon: "🃏"
+api_prefix: /decks
+tags: [decks]
+router_module: opama_pokemon_tcg.decks.router
+model_modules: [opama_pokemon_tcg.decks.models]
+requires:
+  - auth
+  - catalog

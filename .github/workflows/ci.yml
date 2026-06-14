@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  backend:
+    name: Backend (lint + migrate + test)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: opama_user
+          POSTGRES_PASSWORD: opama_pass
+          POSTGRES_DB: opama_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U opama_user"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://opama_user:opama_pass@localhost:5433/opama_test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt ruff pytest
+
+      - name: Lint (ruff)
+        # Blocking gate: syntax errors + pyflakes logic issues + whitespace.
+        # Star-import (F403/F405) and pure-style (E1xx-E7xx) rules are advisory
+        # for now — tighten as the codebase is cleaned up.
+        run: ruff check app services tests alembic scripts celery_app.py --select E9,F,W --ignore F403,F405
+
+      - name: Run Alembic migrations
+        run: alembic upgrade head
+
+      - name: Start API
+        env:
+          AUTH_PROVIDER: local
+          LOCAL_AUTH_SECRET: ci-only-test-secret-not-a-real-deployment
+          CORS_ORIGINS: http://localhost:5173
+        run: |
+          uvicorn app.main:app --port 8008 &
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8008/healthz && break
+            sleep 2
+          done
+          curl -sf http://localhost:8008/healthz
+
+      - name: Run tests
+        env:
+          API_BASE: http://localhost:8008
+        run: pytest -q
+
+  frontend:
+    name: Frontend (typecheck + build)
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: opama-ui
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: opama-ui/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Build
+        run: npm run build
+        env:
+          VITE_API_BASE: http://localhost:8008

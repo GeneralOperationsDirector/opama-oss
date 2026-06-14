@@ -1,0 +1,14 @@
+id: shopify
+name: Shopify
+version: 0.1.0
+tier: premium
+description: Publish your storefront catalog to Shopify as products via the Admin API
+icon: "🛍️"
+api_prefix: ""
+tags: [storefront, shopify]
+router_module: opama_shopify.router
+model_modules:
+  - opama_shopify.models
+requires:
+  - auth
+  - storefront

@@ -1,0 +1,128 @@
+# docker-compose.yml — local development infrastructure
+# Starts Postgres + Redis + the FastAPI backend + the React frontend.
+#
+# Usage:
+#   docker compose up -d                    # start all
+#   docker compose up -d --build backend    # rebuild backend after code changes
+#   docker compose down                     # stop
+#   docker compose down -v                  # stop + wipe volumes
+#
+# URLs:
+#   Opama Dashboard:  http://localhost:5173
+#   Opama API:        http://localhost:6000
+#   API Docs:         http://localhost:6000/docs
+
+services:
+  backend:
+    build: .
+    container_name: opama-backend
+    restart: unless-stopped
+    ports:
+      - "6000:8000"
+    env_file:
+      - .env.local
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://opama_user:opama_dev_pass@postgres:5432/opama_dev}
+      REDIS_HOST: redis
+      # Comma-separated plugin IDs to load. Leave empty to load all plugins (default).
+      # Example (core-only): ENABLED_PLUGINS=custom_assets,system,integrations
+      ENABLED_PLUGINS: ${ENABLED_PLUGINS:-}
+      # RS256 JWT license key. Leave empty for dev mode (all modules enabled).
+      OPAMA_LICENSE_KEY: ${OPAMA_LICENSE_KEY:-}
+      # Comma-separated directories of external plugin packages (each subdir holds
+      # its own plugin.yaml — mirrors services/<id>/). See external_plugins/README.md.
+      PLUGIN_PATHS: ${PLUGIN_PATHS:-/app/external_plugins}
+      # Where type=local marketplace installs are downloaded + extracted to.
+      # Deliberately a separate named volume from external_plugins/ — NOT a
+      # PLUGIN_PATHS entry (see app/plugin_installer.py for why mixing the
+      # two loading paths would double-register packages).
+      DYNAMIC_PLUGINS_ROOT: ${DYNAMIC_PLUGINS_ROOT:-/app/dynamic_plugins}
+      # Pip-installed module packages land in /app/pip-modules (persistent named
+      # volume). PYTHONPATH must include it so importlib.metadata finds .dist-info
+      # entries and Python can import the package code.
+      PYTHONPATH: /app/pip-modules:/app
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: >
+      sh -c "pip install -r /app/requirements-modules.txt --target /app/pip-modules -q 2>/dev/null || true
+      && alembic upgrade head
+      && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    volumes:
+      - ./app:/app/app
+      - ./services:/app/services
+      - ./external_plugins:/app/external_plugins
+      - ./uploads:/app/uploads
+      - dynamic_plugins_data:/app/dynamic_plugins
+      - pip_modules_data:/app/pip-modules
+      - ./requirements-modules.txt:/app/requirements-modules.txt
+      - ./alembic:/app/alembic
+      - ./alembic.ini:/app/alembic.ini
+      # Marketplace catalog — mounted so edits are live without an image rebuild
+      - ./registry.json:/app/registry.json
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # start_period covers the boot-time pip install + alembic upgrade;
+    # ./opama.sh start polls this status instead of guessing.
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/healthz"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 90s
+
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: opama-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-opama}
+      POSTGRES_USER: ${POSTGRES_USER:-opama}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-opama} -d ${POSTGRES_DB:-opama}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  frontend:
+    image: node:22-alpine
+    container_name: opama-frontend
+    working_dir: /app
+    volumes:
+      - ./opama-ui:/app
+      - frontend_node_modules:/app/node_modules
+    command: sh -c "npm install --prefer-offline && npm run dev"
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_TARGET: http://backend:8000
+      # Comma-separated module IDs to enable. Leave empty to enable all (default).
+      # Example (core-only): VITE_ENABLED_MODULES=dashboard,custom,system
+      VITE_ENABLED_MODULES: ${VITE_ENABLED_MODULES:-}
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: opama-redis
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  postgres_data:
+  frontend_node_modules:
+  dynamic_plugins_data:
+  pip_modules_data:

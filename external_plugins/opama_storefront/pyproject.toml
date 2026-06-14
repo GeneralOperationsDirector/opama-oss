@@ -1,0 +1,21 @@
+[project]
+name = "opama-storefront"
+version = "0.1.0"
+description = "Storefront publish module (GitHub/file/webhook) — opama premium plugin"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi",
+    "pydantic",
+    "sqlmodel",
+    "httpx",
+]
+
+[tool.setuptools]
+packages = ["opama_storefront"]
+
+# This file documents the package's eventual standalone shape (the form it would
+# take as github.com/GeneralOperationsDirector/opama-oss-storefront) — see
+# external_plugins/README.md for what's still open before that split actually
+# happens (distribution channel, version pinning, CI). Today opama loads this
+# plugin via PLUGIN_PATHS directory discovery, not via `pip install`; this file
+# isn't yet exercised by the loader.
