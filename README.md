@@ -2,7 +2,7 @@
 
 A self-hosted platform for cataloguing, valuing, and selling the things you collect — watches, art, wine, trading cards, coins, anything. Modular by design: every feature is a plugin, and you can build your own.
 
-<!-- TODO: add dashboard screenshot/GIF here before announcing -->
+![opama dashboard](docs/images/dashboard.png)
 
 > 📖 **Using opama?** See [USERGUIDE.md](USERGUIDE.md) for a walkthrough of Collections, Portfolio, and Storefront setup.
 > 🔌 **Building a module?** See [docs/MODULE_DEVELOPMENT.md](docs/MODULE_DEVELOPMENT.md).

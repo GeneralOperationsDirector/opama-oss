@@ -6,10 +6,7 @@ All notable changes to opama are documented here. The format follows
 
 ## [Unreleased]
 
-<!-- Set the date below to the release day, then create the matching git tag:
-     git tag -a v0.1.0 -m "opama 0.1.0" && git push origin v0.1.0 -->
-
-## [0.1.0] — YYYY-MM-DD
+## [0.1.0] — 2026-06-15
 
 First public release.
 
