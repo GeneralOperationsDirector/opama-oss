@@ -97,6 +97,22 @@ export const ALL_MODULES: ModuleDescriptor[] = [
     navPosition: "dashboard-only",
     description: "Track insurance policies, scheduled coverage, and appraisal records",
   },
+  {
+    id: "vehicles",
+    label: "Vehicles",
+    emoji: "🚗",
+    tier: "free",
+    navPosition: "dashboard-only",
+    description: "Track service history, mileage, and registration documents",
+  },
+  {
+    id: "real_estate",
+    label: "Property",
+    emoji: "🏠",
+    tier: "free",
+    navPosition: "dashboard-only",
+    description: "Track mortgage details, valuations, and property tax records",
+  },
 ];
 
 // Resolve enabled set from build-time env var.
@@ -116,6 +132,8 @@ const _BACKEND_TO_FRONTEND: Record<string, string> = {
   ai: "ai",
   showcase: "showcase",
   insurance: "insurance",
+  vehicles: "vehicles",
+  real_estate: "real_estate",
 };
 
 // All known builtin frontend module IDs (the values of _BACKEND_TO_FRONTEND).

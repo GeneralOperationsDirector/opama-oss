@@ -33,6 +33,8 @@ import CustomAssetsModule from "./features/custom-assets/CustomAssetsModule";
 import StorefrontModule from "./features/storefront/StorefrontModule";
 import GradingView from "./features/grading/GradingView";
 import InsuranceModule from "./features/insurance/InsuranceModule";
+import VehiclesModule from "./features/vehicles/VehiclesModule";
+import RealEstateModule from "./features/real-estate/RealEstateModule";
 import SystemPanel from "./features/system/SystemPanel";
 import PluginStoreModule from "./features/plugin-store/PluginStoreModule";
 import Toaster from "./shared/Toaster";
@@ -565,6 +567,24 @@ export default function OpamaApp() {
         {isModuleEnabled("insurance") && activeModule === "insurance" && (
           currentUser ? (
             <InsuranceModule userId={userId} onToast={addToast} />
+          ) : (
+            <GuestPrompt onSignUp={() => openAuth('signup')} onSignIn={() => openAuth('login')} />
+          )
+        )}
+
+        {/* ── Vehicle Maintenance module ── */}
+        {isModuleEnabled("vehicles") && activeModule === "vehicles" && (
+          currentUser ? (
+            <VehiclesModule userId={userId} onToast={addToast} onNavigate={handleSelectModule} />
+          ) : (
+            <GuestPrompt onSignUp={() => openAuth('signup')} onSignIn={() => openAuth('login')} />
+          )
+        )}
+
+        {/* ── Property Records module ── */}
+        {isModuleEnabled("real_estate") && activeModule === "real_estate" && (
+          currentUser ? (
+            <RealEstateModule userId={userId} onToast={addToast} />
           ) : (
             <GuestPrompt onSignUp={() => openAuth('signup')} onSignIn={() => openAuth('login')} />
           )

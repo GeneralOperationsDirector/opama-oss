@@ -41,7 +41,8 @@ VALID_NAV_POSITIONS = {"topnav", "dashboard-only", "hidden"}
 EXPECTED_PLUGIN_IDS = {
     "ai", "catalog", "custom_assets", "decks", "grading",
     "insurance", "integrations", "inventory", "licensing", "marketplace", "plugin_store",
-    "portfolio", "shopify", "showcase", "storefront", "system", "trading",
+    "portfolio", "real_estate", "shopify", "showcase", "storefront", "system", "trading",
+    "vehicles",
 }
 
 # Core plugins must always be present regardless of ENABLED_PLUGINS
@@ -87,9 +88,9 @@ def manifest_by_id(all_manifests):
 class TestManifestDiscovery:
 
     def test_manifest_count(self, all_manifests):
-        """Exactly 17 plugin.yaml files should exist after Phase 3 + Shopify scaffold + Insurance."""
-        assert len(all_manifests) == 17, (
-            f"Expected 17 manifests, found {len(all_manifests)}: "
+        """Exactly 19 plugin.yaml files should exist after Phase 3 + Shopify scaffold + Insurance + Vehicles + Real Estate."""
+        assert len(all_manifests) == 19, (
+            f"Expected 19 manifests, found {len(all_manifests)}: "
             f"{[m['id'] for m in all_manifests]}"
         )
 

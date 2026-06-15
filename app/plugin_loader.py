@@ -101,6 +101,8 @@ BUILTIN_MODULE_SERVICE_IDS: dict[str, list[str]] = {
     "ai":          ["ai", "decks"],
     "showcase":    ["showcase"],
     "insurance":   ["insurance"],
+    "vehicles":    ["vehicles"],
+    "real_estate": ["real_estate"],
 }
 
 # Tracks which plugin IDs are active in the current process.

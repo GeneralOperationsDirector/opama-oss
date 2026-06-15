@@ -1,0 +1,15 @@
+id: real_estate
+name: Property Records
+version: 1.0.0
+tier: free
+description: Track mortgage details, valuation history, and property tax records for your real estate
+icon: "🏠"
+api_prefix: /real-estate
+tags: [real_estate, property]
+router_module: services.real_estate.router
+model_modules:
+  - services.real_estate.models
+requires:
+  - auth
+  - custom_assets
+requires_core: ">=0.1.0,<0.2.0"

@@ -1,6 +1,6 @@
 // Shared types used across tabs/components
 
-export type AppModule = "dashboard" | "pokemon" | "custom" | "portfolio" | "grading" | "storefront" | "system" | "plugin_store" | "insurance";
+export type AppModule = "dashboard" | "pokemon" | "custom" | "portfolio" | "grading" | "storefront" | "system" | "plugin_store" | "insurance" | "vehicles" | "real_estate";
 
 export type PokemonTab = "catalog" | "inventory" | "decks" | "showcase" | "wishlist" | "trade" | "suggest" | "ebay" | "pokedex" | "portfolio";
 

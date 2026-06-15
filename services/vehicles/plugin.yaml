@@ -1,0 +1,15 @@
+id: vehicles
+name: Vehicle Maintenance
+version: 1.0.0
+tier: free
+description: Track service history, mileage, and registration/title documents for your vehicles
+icon: "🚗"
+api_prefix: /vehicles
+tags: [vehicles, maintenance]
+router_module: services.vehicles.router
+model_modules:
+  - services.vehicles.models
+requires:
+  - auth
+  - custom_assets
+requires_core: ">=0.1.0,<0.2.0"

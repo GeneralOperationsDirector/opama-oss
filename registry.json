@@ -103,5 +103,35 @@
     "category": "Tools",
     "tags": ["insurance", "appraisals"],
     "enable_plugins": "insurance"
+  },
+  {
+    "id": "vehicles",
+    "name": "Vehicle Maintenance",
+    "description": "Track service history, mileage, and registration/title documents for your vehicles.",
+    "version": "1.0.0",
+    "tier": "free",
+    "type": "builtin",
+    "icon": "🚗",
+    "author": "opama",
+    "repo": "",
+    "manifest_url": "",
+    "category": "Tools",
+    "tags": ["vehicles", "maintenance"],
+    "enable_plugins": "vehicles"
+  },
+  {
+    "id": "real_estate",
+    "name": "Property Records",
+    "description": "Track mortgage details, valuation history, and property tax records for your real estate.",
+    "version": "1.0.0",
+    "tier": "free",
+    "type": "builtin",
+    "icon": "🏠",
+    "author": "opama",
+    "repo": "",
+    "manifest_url": "",
+    "category": "Tools",
+    "tags": ["real_estate", "property"],
+    "enable_plugins": "real_estate"
   }
 ]

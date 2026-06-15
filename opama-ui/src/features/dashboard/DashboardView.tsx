@@ -88,6 +88,28 @@ const STATIC_MODULES: ModuleDef[] = [
       </div>
     ),
   },
+  {
+    id: "vehicles",
+    name: "Vehicle Maintenance",
+    description: "Track service history, mileage, and registration/title documents for your vehicles.",
+    itemLabel: "vehicles",
+    iconEl: (
+      <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-red-400 to-rose-600 flex items-center justify-center text-2xl select-none">
+        🚗
+      </div>
+    ),
+  },
+  {
+    id: "real_estate",
+    name: "Property Records",
+    description: "Track mortgage details, valuation history, and property tax records for your real estate.",
+    itemLabel: "properties",
+    iconEl: (
+      <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-lime-400 to-green-600 flex items-center justify-center text-2xl select-none">
+        🏠
+      </div>
+    ),
+  },
 ];
 
 /* ─── Fallback "Collections" card shown when user has no items ───── */
@@ -168,6 +190,50 @@ export default function DashboardView({
         })
         .catch(() => {
           setStatsMap((prev) => ({ ...prev, insurance: { ...EMPTY_STATS, itemLabel: "policies" } }));
+        });
+    }
+
+    if (isModuleEnabled("vehicles")) {
+      setStatsMap((prev) => ({
+        ...prev,
+        vehicles: { ...EMPTY_STATS, loading: true, itemLabel: "vehicles" },
+      }));
+      api<{ vehicle_count: number; total_service_cost: number }>(`/vehicles/summary`)
+        .then((s) => {
+          setStatsMap((prev) => ({
+            ...prev,
+            vehicles: {
+              loading: false,
+              itemLabel: "vehicles",
+              items: s.vehicle_count,
+              value: s.total_service_cost,
+            },
+          }));
+        })
+        .catch(() => {
+          setStatsMap((prev) => ({ ...prev, vehicles: { ...EMPTY_STATS, itemLabel: "vehicles" } }));
+        });
+    }
+
+    if (isModuleEnabled("real_estate")) {
+      setStatsMap((prev) => ({
+        ...prev,
+        real_estate: { ...EMPTY_STATS, loading: true, itemLabel: "properties" },
+      }));
+      api<{ property_count: number; total_valuation: number }>(`/real-estate/summary`)
+        .then((s) => {
+          setStatsMap((prev) => ({
+            ...prev,
+            real_estate: {
+              loading: false,
+              itemLabel: "properties",
+              items: s.property_count,
+              value: s.total_valuation,
+            },
+          }));
+        })
+        .catch(() => {
+          setStatsMap((prev) => ({ ...prev, real_estate: { ...EMPTY_STATS, itemLabel: "properties" } }));
         });
     }
 

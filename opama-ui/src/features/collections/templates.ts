@@ -195,6 +195,22 @@ export const TEMPLATES: CollectionTemplate[] = [
     category: "Vehicle",
     fields: ["Make", "Model", "Year", "VIN", "Mileage", "Color", "Engine", "Transmission", "Title Status"],
   },
+  {
+    id: "bicycle",
+    emoji: "🚲",
+    name: "Bicycle",
+    category: "Bicycle",
+    fields: ["Brand", "Model", "Type", "Frame Size", "Year", "Serial Number", "Color"],
+  },
+
+  // ── Real Estate ──────────────────────────────────────────────
+  {
+    id: "real-estate",
+    emoji: "🏠",
+    name: "Real Estate",
+    category: "Real Estate",
+    fields: ["Address", "Property Type", "Square Footage", "Lot Size", "Year Built", "Bedrooms", "Bathrooms", "Parcel/Tax ID"],
+  },
 
   // ── Financial Assets ─────────────────────────────────────────
   {
