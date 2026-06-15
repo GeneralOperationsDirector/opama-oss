@@ -1,5 +1,5 @@
 # ---------- Backend stage ----------
-FROM python:3.12-slim AS backend
+FROM python:3.14-slim AS backend
 WORKDIR /app
 
 # System deps
