@@ -76,8 +76,21 @@ Install **Docker Desktop** (or [OrbStack](https://orbstack.dev) on Mac — light
 
 - Mac: https://orbstack.dev *(recommended)* or https://docs.docker.com/desktop/install/mac-install/
 - Windows: https://docs.docker.com/desktop/install/windows-install/
+- Linux: Docker Engine 20.10+ with the Compose v2 plugin (`docker compose version`)
 
 No other runtimes needed — Python, Node, and PostgreSQL all run inside Docker.
+
+### System Requirements
+
+| Resource | Minimum | Recommended |
+|---|---|---|
+| **RAM** | 4 GB | 8 GB (more if you enable the AI module) |
+| **CPU** | 2 cores | 4 cores |
+| **Disk** | 10 GB free | — |
+
+- **OS:** Linux (Ubuntu 20.04+ or any modern distro with Docker), macOS, or Windows
+- **Ports:** `5173` (frontend), `6000` (backend API), `5433` (Postgres) must be free
+- **Optional:** [Ollama](https://ollama.ai) on the host for local AI chat/card identification (reached via `host.docker.internal:11434`); an OpenAI or Anthropic API key for hosted LLM providers
 
 ### 1. Clone
 
