@@ -20,7 +20,7 @@ httpx
 aiohttp
 FlagEmbedding
 # Transitive via FlagEmbedding's ir_datasets/inscriptis — floor pinned for PYSEC-2026-87
-lxml>=6.1.0
+lxml>=6.1.1
 redis
 apscheduler
 celery[redis]==5.4.0
