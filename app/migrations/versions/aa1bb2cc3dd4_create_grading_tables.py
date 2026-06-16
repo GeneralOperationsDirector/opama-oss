@@ -54,11 +54,14 @@ def upgrade() -> None:
         sa.Column("transferred_item_id", sa.Integer(), nullable=True),
         sa.Column("analyzed_at", sa.String(), nullable=False),
         sa.ForeignKeyConstraint(["asset_id"], ["customasset.id"]),
+        sa.ForeignKeyConstraint(["card_id"], ["card.id"], name="cardgraderesult_card_id_fkey"),
+        sa.ForeignKeyConstraint(["inventory_item_id"], ["inventoryitem.id"], name="cardgraderesult_inventory_item_id_fkey"),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index("ix_cardgraderesult_user_id", "cardgraderesult", ["user_id"])
     op.create_index("ix_cardgraderesult_card_id", "cardgraderesult", ["card_id"])
-    op.create_index("ix_cardgraderesult_inventory_item_id", "cardgraderesult", ["inventory_item_id"])
+    # ix_cardgraderesult_inventory_item_id is created by migration 08861d51264f
+    # after it drops the FK constraint on this column.
 
     op.create_table(
         "identificationattempt",
