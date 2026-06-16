@@ -39,7 +39,7 @@ VALID_NAV_POSITIONS = {"topnav", "dashboard-only", "hidden"}
 
 # IDs we expect to exist after Phase 3
 EXPECTED_PLUGIN_IDS = {
-    "ai", "catalog", "custom_assets", "decks", "github_publish", "grading",
+    "ai", "ai_assistant", "catalog", "custom_assets", "decks", "github_publish", "grading",
     "insurance", "integrations", "inventory", "licensing", "marketplace", "plugin_store",
     "portfolio", "real_estate", "shopify", "showcase", "storefront", "system", "trading",
     "vehicles",
@@ -89,8 +89,8 @@ class TestManifestDiscovery:
 
     def test_manifest_count(self, all_manifests):
         """Exactly 20 plugin.yaml files should exist after Phase 3 + Shopify scaffold + Insurance + Vehicles + Real Estate + github_publish extraction."""
-        assert len(all_manifests) == 20, (
-            f"Expected 20 manifests, found {len(all_manifests)}: "
+        assert len(all_manifests) == 21, (
+            f"Expected 21 manifests, found {len(all_manifests)}: "
             f"{[m['id'] for m in all_manifests]}"
         )
 
