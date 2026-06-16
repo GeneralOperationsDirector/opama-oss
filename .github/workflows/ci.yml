@@ -65,6 +65,7 @@ jobs:
           AUTH_PROVIDER: local
           LOCAL_AUTH_SECRET: ci-only-test-secret-not-a-real-deployment
           CORS_ORIGINS: http://localhost:5173
+          PLUGIN_PATHS: ${{ github.workspace }}/external_plugins
         run: |
           uvicorn app.main:app --port 8008 &
           for i in $(seq 1 30); do
