@@ -41,6 +41,16 @@ jobs:
       - name: Install dependencies
         run: pip install -e ".[all]" ruff pytest pytest-cov
 
+      - name: Generate test license keypair
+        run: |
+          openssl genrsa -out /tmp/test_license.pem 2048 2>/dev/null
+          echo "OPAMA_LICENSE_SIGNING_KEY=/tmp/test_license.pem" >> $GITHUB_ENV
+          {
+            echo "OPAMA_LICENSE_PUBLIC_KEY<<EOF"
+            openssl rsa -in /tmp/test_license.pem -pubout 2>/dev/null
+            echo "EOF"
+          } >> $GITHUB_ENV
+
       - name: Lint (ruff)
         # Blocking gate: syntax errors + pyflakes logic issues + whitespace.
         # Star-import (F403/F405) and pure-style (E1xx-E7xx) rules are advisory
