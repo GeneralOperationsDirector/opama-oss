@@ -1,0 +1,14 @@
+id: portfolio
+name: Portfolio
+version: 1.0.0
+tier: premium
+description: Portfolio valuation, historical tracking, and P&L analysis
+icon: "📈"
+api_prefix: /portfolio
+tags: [portfolio]
+router_module: opama_portfolio.router
+model_modules: [opama_portfolio.models]
+requires:
+  - auth
+  - inventory
+  - catalog

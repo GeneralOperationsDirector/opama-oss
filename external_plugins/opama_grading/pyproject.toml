@@ -1,0 +1,26 @@
+[project]
+name = "opama-grading"
+version = "1.0.0"
+description = "AI-powered card grading (OpenCV, vision models, OCR) — opama premium plugin"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi",
+    "pydantic",
+    "sqlmodel",
+    "slowapi",
+    "opencv-python-headless",
+    "numpy",
+    "Pillow",
+    "pytesseract",
+    "requests",
+]
+
+[tool.setuptools]
+packages = ["opama_grading"]
+
+# This file documents the package's eventual standalone shape (the form it would
+# take as github.com/GeneralOperationsDirector/opama-oss-grading) — see
+# external_plugins/README.md for what's still open before that split actually
+# happens (distribution channel, version pinning, CI). Today opama loads this
+# plugin via PLUGIN_PATHS directory discovery, not via `pip install`; this file
+# isn't yet exercised by the loader.

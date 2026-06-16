@@ -1,0 +1,13 @@
+id: github_publish
+name: GitHub Publishing
+version: 1.0.0
+tier: premium
+description: Commit files to a GitHub repository via the Contents API (used by Storefront's catalog publish)
+icon: "🐙"
+api_prefix: ""
+tags: [integrations, github]
+router_module: services.github_publish.router
+model_modules: []
+requires:
+  - auth
+requires_core: ">=0.1.0,<0.2.0"

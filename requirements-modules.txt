@@ -1,0 +1,4 @@
+# Pip packages that register opama.modules entry points.
+# Installed at container startup to /app/pip-modules (persistent volume).
+# Append to this file via POST /plugin-store/pip-install, or edit manually.
+# Format: one package per line (PEP 440 specifiers supported, e.g. my-pkg==1.2.0)

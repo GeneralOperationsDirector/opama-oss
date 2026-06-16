@@ -1,0 +1,15 @@
+id: storefront
+name: Storefront
+version: 1.0.0
+tier: premium
+description: Publish your collection for sale online via GitHub, webhook, or file
+icon: "🛒"
+api_prefix: ""
+tags: [storefront]
+router_module: opama_storefront.router
+model_modules:
+  - opama_storefront.models
+requires:
+  - auth
+  - custom_assets
+  - github_publish

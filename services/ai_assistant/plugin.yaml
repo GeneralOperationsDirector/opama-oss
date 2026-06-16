@@ -1,0 +1,16 @@
+id: ai_assistant
+name: AI Assistant
+version: 0.1.0
+tier: free
+type: local
+description: Chat with an AI assistant across all your opama data, and connect external agents like Claude Code via secure tokens.
+icon: "🤖"
+api_prefix: "/ai-assistant"
+tags: [ai_assistant, ai, mcp]
+router_module: services.ai_assistant.router
+model_modules:
+  - services.ai_assistant.models
+requires:
+  - auth
+  - custom_assets
+requires_core: ">=0.1.0,<0.2.0"

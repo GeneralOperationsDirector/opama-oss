@@ -1,0 +1,15 @@
+id: grading
+name: Card Grader
+version: 1.0.0
+tier: premium
+description: AI-powered card grading using OpenCV, vision models, and OCR
+icon: "🔬"
+api_prefix: ""
+tags: [grading]
+router_module: opama_grading.router
+model_modules:
+  - opama_grading.models
+requires:
+  - auth
+  - custom_assets
+  - catalog

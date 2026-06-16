@@ -1,0 +1,13 @@
+id: trading
+name: Trading & Wishlists
+version: 1.0.0
+tier: premium
+description: Wish lists and trade offers for Pokémon cards
+icon: "🔄"
+api_prefix: ""
+tags: [trading]
+router_module: opama_pokemon_tcg.trading.router
+model_modules: [opama_pokemon_tcg.trading.models]
+requires:
+  - auth
+  - catalog

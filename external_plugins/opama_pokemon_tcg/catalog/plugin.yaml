@@ -1,0 +1,12 @@
+id: catalog
+name: Pokémon TCG Catalog
+version: 1.0.0
+tier: premium
+description: Pokémon TCG card catalog, set browsing, and data sync
+icon: "📖"
+api_prefix: /cards
+tags: [catalog]
+router_module: opama_pokemon_tcg.catalog.router
+model_modules: [opama_pokemon_tcg.catalog.models]
+requires:
+  - auth

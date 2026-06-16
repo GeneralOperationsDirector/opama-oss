@@ -1,0 +1,15 @@
+id: ai
+name: AI Assistant
+version: 1.0.0
+tier: premium
+description: AI-powered deck suggestions and RAG-backed chat
+icon: "🤖"
+api_prefix: ""
+tags: [suggest, ai]
+router_module: opama_ai.router
+model_modules: []
+requires:
+  - auth
+  - decks
+  - catalog
+  - inventory

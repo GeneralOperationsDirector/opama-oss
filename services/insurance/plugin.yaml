@@ -1,0 +1,16 @@
+id: insurance
+name: Insurance & Appraisals
+version: 1.0.0
+tier: free
+description: Track insurance policies, scheduled coverage, and appraisal records for your collection
+icon: "🛡️"
+api_prefix: /insurance
+tags: [insurance, appraisals]
+router_module: services.insurance.router
+model_modules:
+  - services.insurance.models
+tools_module: services.insurance.tools
+requires:
+  - auth
+  - custom_assets
+requires_core: ">=0.1.0,<0.2.0"

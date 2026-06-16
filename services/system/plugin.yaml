@@ -1,0 +1,12 @@
+id: system
+name: System Panel
+version: 1.0.0
+tier: core
+description: System diagnostics, health info, and storage stats
+icon: "⚙️"
+api_prefix: ""
+tags: [system]
+router_module: services.system.router
+model_modules: []
+requires:
+  - auth
