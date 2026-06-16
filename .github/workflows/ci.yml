@@ -39,16 +39,16 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install -r requirements.txt ruff pytest
+        run: pip install -e ".[all]" ruff pytest pytest-cov
 
       - name: Lint (ruff)
         # Blocking gate: syntax errors + pyflakes logic issues + whitespace.
         # Star-import (F403/F405) and pure-style (E1xx-E7xx) rules are advisory
         # for now — tighten as the codebase is cleaned up.
-        run: ruff check app services tests alembic scripts celery_app.py --select E9,F,W --ignore F403,F405
+        run: ruff check app services tests scripts celery_app.py --select E9,F,W --ignore F403,F405
 
       - name: Run Alembic migrations
-        run: alembic upgrade head
+        run: opama migrate
 
       - name: Start API
         env:
