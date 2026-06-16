@@ -19,6 +19,7 @@ provides the get_current_user dependency that all other plugins depend on.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -142,7 +143,8 @@ record_loaded_ids(_static_loaded)
 load_plugin_tools([l.manifest for l in _static_loaded])
 
 # --- Static files --------------------------------------------------------
-_uploads_dir = Path("/app/uploads")
+_default_uploads = Path(__file__).resolve().parents[1] / "uploads"
+_uploads_dir = Path(os.getenv("UPLOADS_PATH", str(_default_uploads)))
 _uploads_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=str(_uploads_dir)), name="uploads")
 
