@@ -20,20 +20,16 @@ import pytest
 pytest.importorskip("openai")
 pytest.importorskip("anthropic")
 
-# opama_ai lives under external_plugins/ (loaded via PLUGIN_PATHS at runtime —
-# see external_plugins/README.md); add it to sys.path for direct test imports.
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "external_plugins"))
-
-from opama_ai.providers import (
+from services.shared.llm import (
     LLMMessage,
     LLMProviderError,
     get_provider,
     parse_json_loose,
     with_json_instruction,
 )
-from opama_ai.providers.anthropic_provider import AnthropicProvider
-from opama_ai.providers.ollama_provider import OllamaProvider
-from opama_ai.providers.openai_provider import OpenAIProvider
+from services.shared.llm.anthropic_provider import AnthropicProvider
+from services.shared.llm.ollama_provider import OllamaProvider
+from services.shared.llm.openai_provider import OpenAIProvider
 
 
 # ---------------------------------------------------------------------------
