@@ -1,0 +1,8 @@
+# Control-plane dependencies. Kept separate from opama's requirements.txt so the
+# control plane can be extracted to its own repo later.
+fastapi
+uvicorn[standard]
+sqlmodel
+psycopg2-binary
+docker
+stripe            # used from M3 onward (webhook signature verify + event types)

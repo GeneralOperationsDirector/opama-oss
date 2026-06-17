@@ -20,56 +20,37 @@ IMPORTANT: Keep the private key in this script secret.
 import argparse
 import os
 import sys
-import uuid
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
+
+# Make the repo root importable when run standalone (`python scripts/...`), so
+# the canonical signer in the control plane resolves.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 try:
-    import jwt
-except ImportError:
+    from control_plane.licensing import load_private_key, sign_license
+except ImportError as exc:
     print(
-        "ERROR: PyJWT is not installed.\n"
-        "Install with:  pip install 'PyJWT[crypto]'",
+        f"ERROR: could not import the license signer ({exc}).\n"
+        "Install deps with:  pip install 'PyJWT[crypto]'",
         file=sys.stderr,
     )
     sys.exit(1)
 
-# RSA-2048 signing key — kept OUT of the repository so it can never leak.
-# Point OPAMA_LICENSE_SIGNING_KEY at your PEM file (default: ./license_signing_key.pem).
-# To create a new keypair (the matching public key goes in app/license.py):
-#   openssl genrsa -out license_signing_key.pem 2048
+# Signing now lives in control_plane/licensing.py — the single source of truth for
+# the license claim shape. This script is a thin CLI wrapper kept for back-compat.
+# `_KEY_PATH`, `_PRIVATE_KEY`, and `generate_key` are preserved because
+# tests/test_license.py imports them.
 _KEY_PATH = os.environ.get("OPAMA_LICENSE_SIGNING_KEY", "license_signing_key.pem")
-_PRIVATE_KEY: str | None = None
-try:
-    with open(_KEY_PATH) as _fh:
-        _PRIVATE_KEY = _fh.read()
-except FileNotFoundError:
-    pass  # generate_key() raises if called without the key
+_PRIVATE_KEY: str | None = load_private_key()
 
 VALID_TIERS = {"core", "free", "premium", "enterprise"}
 
 
 def generate_key(customer: str, tier: str, modules: str, days: int) -> str:
-    if _PRIVATE_KEY is None:
-        raise RuntimeError(
-            f"License signing key not found at {_KEY_PATH!r}.\n"
-            "Set OPAMA_LICENSE_SIGNING_KEY or place license_signing_key.pem in the CWD."
-        )
-    now = datetime.now(tz=timezone.utc)
-    modules_value: list[str] | str = (
-        "*" if modules.strip() == "*"
-        else [m.strip() for m in modules.split(",") if m.strip()]
-    )
-    payload = {
-        "iss": "opama",
-        "sub": customer,
-        "customer": customer,
-        "tier": tier,
-        "modules": modules_value,
-        "iat": now,
-        "exp": now + timedelta(days=days),
-        "jti": str(uuid.uuid4()),
-    }
-    return jwt.encode(payload, _PRIVATE_KEY, algorithm="RS256")
+    """Back-compat wrapper: mint a key that expires `days` from now."""
+    expires_at = datetime.now(tz=timezone.utc) + timedelta(days=days)
+    return sign_license(customer, tier, modules, expires_at)
 
 
 def main() -> None:
