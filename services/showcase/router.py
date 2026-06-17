@@ -26,6 +26,7 @@ from services.shared.models import User
 from services.custom_assets.models import CustomAsset
 from services.showcase.models import Showcase, ShowcaseCard
 from services.auth.middleware import get_current_user, get_optional_user
+from services.auth.org_context import OrgContext, get_current_org
 
 try:
     from opama_pokemon_tcg.catalog.models import Card
@@ -40,19 +41,19 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 
 
-def _verify_card_exists(session: Session, card_id: str, current_user: User) -> None:
-    """Raise 404/403 unless card_id resolves to a reference the user may add.
+def _verify_card_exists(session: Session, card_id: str, ctx: OrgContext) -> None:
+    """Raise 404/403 unless card_id resolves to a reference the org may add.
 
     CustomAsset ids are integers (stringified), so a purely numeric card_id
-    is checked against the user's own collection first. Pokémon TCG catalog
+    is checked against the active org's collection first. Pokémon TCG catalog
     card ids are hyphenated strings (e.g. "sv9-12a") and are global/public,
     so no ownership check applies to them.
     """
     if card_id.isdigit():
         asset = session.get(CustomAsset, int(card_id))
         if asset:
-            if asset.user_id != current_user.id:
-                raise HTTPException(403, "Cannot add another user's item to a showcase")
+            if asset.org_id != ctx.org_id:
+                raise HTTPException(403, "Cannot add another organization's item to a showcase")
             return
 
     if Card is not None and session.get(Card, card_id):
@@ -146,18 +147,16 @@ class UpdateCardRequest(BaseModel):
 @router.get("", response_model=List[dict])
 def list_showcases(
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     """
-    List showcases for the authenticated user, newest-first.
+    List showcases for the active organization, newest-first.
 
-    Authentication: REQUIRED - returns only the authenticated user's showcases.
+    Authentication: REQUIRED - returns only the active organization's showcases.
     """
-    target_user_id = current_user.id
-
     showcases = session.exec(
         select(Showcase)
-        .where(Showcase.user_id == target_user_id)
+        .where(Showcase.org_id == ctx.org_id)
         .order_by(Showcase.updated_at.desc())
     ).all()
 
@@ -180,16 +179,16 @@ def create_showcase(
     payload: CreateShowcaseRequest,
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     """
-    Create a new showcase for the authenticated user.
+    Create a new showcase in the active organization.
 
     Authentication: REQUIRED.
     """
-    target_user_id = current_user.id
-
     showcase = Showcase(
-        user_id=target_user_id,
+        org_id=ctx.org_id,            # owning organization (tenancy/RLS scope)
+        user_id=current_user.id,      # creating/acting user (audit)
         title=payload.title,
         description=payload.description,
         is_public=payload.is_public,
@@ -269,20 +268,20 @@ def update_showcase(
     showcase_id: int,
     payload: UpdateShowcaseRequest,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     """
     Update showcase metadata (title, description, is_public).
 
-    Authentication: REQUIRED - can only update own showcases.
+    Authentication: REQUIRED - can only update the active org's showcases.
     """
     showcase = session.get(Showcase, showcase_id)
     if not showcase:
         raise HTTPException(404, "Showcase not found")
 
-    # Verify ownership
-    if showcase.user_id != current_user.id:
-        raise HTTPException(403, "Cannot update another user's showcase")
+    # Verify org ownership
+    if showcase.org_id != ctx.org_id:
+        raise HTTPException(403, "Cannot update another organization's showcase")
 
     # Update fields
     if payload.title is not None:
@@ -313,20 +312,20 @@ def update_showcase(
 def delete_showcase(
     showcase_id: int,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     """
     Delete a showcase and all its cards.
 
-    Authentication: REQUIRED - can only delete own showcases.
+    Authentication: REQUIRED - can only delete the active org's showcases.
     """
     showcase = session.get(Showcase, showcase_id)
     if not showcase:
         raise HTTPException(404, "Showcase not found")
 
-    # Verify ownership
-    if showcase.user_id != current_user.id:
-        raise HTTPException(403, "Cannot delete another user's showcase")
+    # Verify org ownership
+    if showcase.org_id != ctx.org_id:
+        raise HTTPException(403, "Cannot delete another organization's showcase")
 
     # Delete all showcase cards first
     showcase_cards = session.exec(
@@ -352,7 +351,7 @@ def add_showcase_card(
     showcase_id: int,
     payload: AddCardRequest,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     """
     Add a card to a showcase (idempotent add).
@@ -372,12 +371,12 @@ def add_showcase_card(
     if not showcase:
         raise HTTPException(404, "Showcase not found")
 
-    # Verify ownership
-    if showcase.user_id != current_user.id:
-        raise HTTPException(403, "Cannot add cards to another user's showcase")
+    # Verify org ownership
+    if showcase.org_id != ctx.org_id:
+        raise HTTPException(403, "Cannot add cards to another organization's showcase")
 
-    # Verify the referenced item exists and is accessible to this user
-    _verify_card_exists(session, payload.card_id, current_user)
+    # Verify the referenced item exists and is accessible to this org
+    _verify_card_exists(session, payload.card_id, ctx)
 
     # Check if card already in showcase
     existing = session.exec(
@@ -421,12 +420,12 @@ def update_showcase_card(
     card_item_id: int,
     payload: UpdateCardRequest,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     """
     Update a card's quantity or notes in a showcase.
 
-    Authentication: REQUIRED - can only update cards in own showcases.
+    Authentication: REQUIRED - can only update cards in the active org's showcases.
 
     If quantity is set to 0 or less, the card is removed from the showcase.
     """
@@ -434,10 +433,10 @@ def update_showcase_card(
     if not showcase_card or showcase_card.showcase_id != showcase_id:
         raise HTTPException(404, "Showcase card not found")
 
-    # Verify showcase ownership
+    # Verify showcase org ownership
     showcase = session.get(Showcase, showcase_id)
-    if not showcase or showcase.user_id != current_user.id:
-        raise HTTPException(403, "Cannot update cards in another user's showcase")
+    if not showcase or showcase.org_id != ctx.org_id:
+        raise HTTPException(403, "Cannot update cards in another organization's showcase")
 
     # Update fields
     if payload.quantity is not None:
@@ -476,21 +475,21 @@ def remove_showcase_card(
     showcase_id: int,
     card_item_id: int,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     """
     Remove a card from a showcase.
 
-    Authentication: REQUIRED - can only remove cards from own showcases.
+    Authentication: REQUIRED - can only remove cards from the active org's showcases.
     """
     showcase_card = session.get(ShowcaseCard, card_item_id)
     if not showcase_card or showcase_card.showcase_id != showcase_id:
         raise HTTPException(404, "Showcase card not found")
 
-    # Verify showcase ownership
+    # Verify showcase org ownership
     showcase = session.get(Showcase, showcase_id)
-    if not showcase or showcase.user_id != current_user.id:
-        raise HTTPException(403, "Cannot remove cards from another user's showcase")
+    if not showcase or showcase.org_id != ctx.org_id:
+        raise HTTPException(403, "Cannot remove cards from another organization's showcase")
 
     session.delete(showcase_card)
 

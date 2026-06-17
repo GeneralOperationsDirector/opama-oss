@@ -20,6 +20,7 @@ disabling/removing a plugin doesn't drag its tables into the core schema.
 from typing import Optional
 from datetime import datetime
 from sqlmodel import SQLModel, Field
+from sqlalchemy import UniqueConstraint
 
 # ---------------------------------------------------------------------------
 # Users
@@ -77,6 +78,93 @@ class LocalCredential(SQLModel, table=True):
 
 
 # ---------------------------------------------------------------------------
+# Organizations & Memberships (tenancy + billing boundary for the shared-DB
+# "pool" SaaS tier — see the pool_vs_silo design memory)
+# ---------------------------------------------------------------------------
+#
+# An Organization is the unit that *owns* collection data and *holds* the
+# subscription/entitlement. It is deliberately the boundary, not the User, so a
+# store owner can have staff act on the shop's catalog under one subscription.
+# A solo collector is modelled as an "org-of-one" (one Organization with a
+# single owner Membership) so the same code path serves individuals and stores.
+#
+# These tables always exist (core), but they are only *load-bearing* in the
+# pooled SaaS deployment. Self-hosted/silo instances get a single auto-created
+# org and can otherwise ignore them.
+
+# Membership roles, ordered by privilege. owner > manager > staff.
+ORG_ROLE_OWNER = "owner"
+ORG_ROLE_MANAGER = "manager"
+ORG_ROLE_STAFF = "staff"
+ORG_ROLES = (ORG_ROLE_OWNER, ORG_ROLE_MANAGER, ORG_ROLE_STAFF)
+# Higher rank = more privilege; used for "at least this role" checks.
+ORG_ROLE_RANK = {ORG_ROLE_STAFF: 0, ORG_ROLE_MANAGER: 1, ORG_ROLE_OWNER: 2}
+
+
+class Organization(SQLModel, table=True):
+    """
+    A billing + data-ownership boundary.
+
+    Collection-type rows (assets, inventory, decks, storefront settings) are
+    owned by an Organization via an ``org_id`` column; the ``User`` that created
+    or edited a row is retained separately for the audit trail. Entitlements
+    (tier/modules) live here, not on the User, so one subscription covers a
+    store's whole staff.
+
+    Attributes:
+        id: Primary key.
+        name: Human-facing org / shop name.
+        slug: URL-safe unique handle (also the storefront/public identifier).
+        plan_tier: entitlement tier — one of app.license.TIER_RANK keys
+            ("core" | "free" | "premium" | "enterprise"). Flipped by the SaaS
+            Stripe webhook; read per-request by the require_tier() dependency.
+        plan_modules: allow-list of module ids ("*" = all modules in the tier).
+        plan_status: subscription lifecycle ("active" | "past_due" |
+            "canceled"). Distinct from tier so a lapse can gate without losing
+            which tier they were on.
+        stripe_customer_id: Stripe customer this org bills under (nullable for
+            self-hosted / un-billed orgs).
+        current_period_end: when the current paid period ends (entitlement
+            expiry); null for non-expiring/self-hosted orgs.
+        is_personal: True for the auto-created org-of-one backing a solo user.
+        created_at: creation timestamp.
+    """
+
+    id: int = Field(default=None, primary_key=True)
+    name: str
+    slug: str = Field(unique=True, index=True)
+    plan_tier: str = Field(default="free")
+    plan_modules: str = Field(default="*")
+    plan_status: str = Field(default="active")
+    stripe_customer_id: Optional[str] = Field(default=None, unique=True, index=True)
+    current_period_end: Optional[datetime] = None
+    is_personal: bool = Field(default=False)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class Membership(SQLModel, table=True):
+    """
+    Links a User to an Organization with a role.
+
+    A user may belong to several orgs (e.g. their personal collection plus a
+    shop they work at); the app resolves an "active org" per request. The
+    (org_id, user_id) pair is unique — one membership row per user per org.
+
+    role: one of ORG_ROLES (owner | manager | staff). Ownership/mutation checks
+    shift from "row.user_id == current_user.id" to "current_user has a
+    sufficient-role Membership in the row's org".
+    """
+
+    __table_args__ = (UniqueConstraint("org_id", "user_id", name="uq_membership_org_user"),)
+
+    id: int = Field(default=None, primary_key=True)
+    org_id: int = Field(foreign_key="organization.id", index=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    role: str = Field(default=ORG_ROLE_OWNER)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+# ---------------------------------------------------------------------------
 # Generic Assets (non-card items: books, electronics, collectibles, etc.)
 # ---------------------------------------------------------------------------
 
@@ -94,6 +182,10 @@ class GenericAsset(SQLModel, table=True):
     """
 
     id: int = Field(default=None, primary_key=True)
+    # Ownership/RLS scope (pool tenancy — see pool_vs_silo). org_id owns the row;
+    # user_id is kept as the creating/acting user for audit. Nullable through the
+    # backfill migration, then becomes the canonical tenancy scope key.
+    org_id: int = Field(foreign_key="organization.id", index=True)
     user_id: int = Field(foreign_key="user.id")
 
     asset_class: str = Field(default="other")  # book / electronics / collectible / …

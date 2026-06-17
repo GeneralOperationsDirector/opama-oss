@@ -21,6 +21,8 @@ from sqlmodel import SQLModel, Field
 
 class ServiceRecord(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
+    # Ownership/RLS scope (pool tenancy — see pool_vs_silo); nullable through backfill.
+    org_id: int = Field(foreign_key="organization.id", index=True)
     user_id: int = Field(index=True)
     asset_id: int = Field(foreign_key="customasset.id", ondelete="CASCADE", index=True)
 
@@ -40,6 +42,7 @@ class ServiceRecord(SQLModel, table=True):
 
 class VehicleDocument(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
+    org_id: int = Field(foreign_key="organization.id", index=True)
     user_id: int = Field(index=True)
     asset_id: int = Field(foreign_key="customasset.id", ondelete="CASCADE", index=True)
 

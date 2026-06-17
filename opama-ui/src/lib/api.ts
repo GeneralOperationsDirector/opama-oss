@@ -8,7 +8,7 @@
  * NOTE: We preserve your original `api<T>()` so existing imports keep working.
  ******************************************************************* */
 
-import { getAuthToken } from './authToken';
+import { getRequestHeaders } from './authToken';
 
 export const API_BASE: string =
   (import.meta as any).env?.VITE_API_BASE ?? "http://localhost:8008";
@@ -19,11 +19,10 @@ const DEFAULT_TIMEOUT = 25_000;
 /** Lightweight sleep used by retry. */
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** Build the Authorization header for the active auth provider (Firebase ID
- * token or locally-stored opama token — see lib/authToken.ts). */
+/** Build request headers (bearer token + active-org `X-Org-Id`) for the active
+ * auth provider — see lib/authToken.ts / lib/activeOrg.ts. */
 async function getAuthHeaders(): Promise<HeadersInit> {
-  const token = await getAuthToken();
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  return getRequestHeaders();
 }
 
 /** Build URL with optional query params (auto-encodes and drops null/undefined). */

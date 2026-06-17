@@ -39,6 +39,8 @@ class WishList(SQLModel, table=True):
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)
+    # Ownership/RLS scope (pool tenancy — see pool_vs_silo); nullable through backfill.
+    org_id: int = Field(foreign_key="organization.id", index=True)
     user_id: int  # TODO: If you want referential integrity, add FK(User.id)
     card_id: str  # TODO: Add FK("card.id") if schema supports it
     note: Optional[str] = None
@@ -65,6 +67,8 @@ class TradeItem(SQLModel, table=True):
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)
+    # Ownership/RLS scope (pool tenancy — see pool_vs_silo); nullable through backfill.
+    org_id: int = Field(foreign_key="organization.id", index=True)
     user_id: int
     card_id: str
     quantity: int = 1  # TODO: Consider making non-nullable with min=1 validator

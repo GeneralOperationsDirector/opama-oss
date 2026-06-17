@@ -23,6 +23,7 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 from services.shared.database import get_session
 from services.auth.middleware import get_current_user
+from services.auth.org_context import OrgContext, get_current_org
 from services.shared.models import User
 from opama_pokemon_tcg.inventory.models import InventoryItem
 from opama_pokemon_tcg.catalog.models import Card, Set
@@ -158,6 +159,7 @@ def parse_entry(e: str):
 def _merge_or_create_inventory(
     session: Session,
     *,
+    org_id: int,
     user_id: int,
     card_id: str,
     quantity: int,
@@ -168,18 +170,19 @@ def _merge_or_create_inventory(
     **rest,
 ) -> InventoryItem:
     """
-    Merge-on-duplicate behavior:
-      - If an existing row matches (user_id, card_id, condition, flags),
-        increment its quantity.
-      - Otherwise, create a new row.
+    Merge-on-duplicate behavior (pool tenancy):
+      - If an existing row in the active org matches
+        (org_id, card_id, condition, flags), increment its quantity.
+      - Otherwise, create a new row owned by the org. user_id is retained as the
+        acting/created-by actor for audit.
 
     # TODO(db): Add a DB UNIQUE INDEX on
-                (user_id, card_id, condition, is_holo, is_reverse_holo, is_alt_art)
+                (org_id, card_id, condition, is_holo, is_reverse_holo, is_alt_art)
                 to enforce this invariant at the database layer and prevent races.
     """
     existing = session.exec(
         select(InventoryItem).where(
-            (InventoryItem.user_id == user_id)
+            (InventoryItem.org_id == org_id)
             & (InventoryItem.card_id == card_id)
             & (InventoryItem.condition == condition)
             & (InventoryItem.is_holo.is_(is_holo))
@@ -196,7 +199,8 @@ def _merge_or_create_inventory(
 
     # Create new row; only persist whitelisted optional fields from `rest`
     inv = InventoryItem(
-        user_id=user_id,
+        org_id=org_id,          # owning organization (tenancy/RLS scope)
+        user_id=user_id,        # creating/acting user (audit)
         card_id=card_id,
         quantity=quantity,
         condition=condition,
@@ -223,6 +227,7 @@ def quick_add_inventory(
     payload: QuickAddIn,
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     """
     Quickly add many cards by set + number strings.
@@ -297,6 +302,7 @@ def quick_add_inventory(
         if not payload.dry_run:
             inv = _merge_or_create_inventory(
                 session,
+                org_id=ctx.org_id,
                 user_id=target_user_id,
                 card_id=c.id,
                 quantity=qty,
@@ -324,6 +330,7 @@ def add_inventory(
     item: InventoryIn,
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     """
     Add a single inventory entry.
@@ -346,9 +353,10 @@ def add_inventory(
             404, f"Card {item.card_id} not found in catalog. Import set CSV first."
         )
 
-    # Override user_id from auth (ignore any user_id in payload)
+    # Override user_id from auth (ignore any user_id in payload); scope to active org
     item_data = item.dict()
     item_data["user_id"] = target_user_id
+    item_data["org_id"] = ctx.org_id
 
     inv = _merge_or_create_inventory(session, **item_data)
     session.commit()
@@ -359,27 +367,25 @@ def add_inventory(
 @router.get("")
 def list_inventory(
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
-    """Return raw InventoryItem rows for the authenticated user (no card join)."""
+    """Return raw InventoryItem rows for the active organization (no card join)."""
     return session.exec(
-        select(InventoryItem).where(InventoryItem.user_id == current_user.id)
+        select(InventoryItem).where(InventoryItem.org_id == ctx.org_id)
     ).all()
 
 
 @router.get("/with_cards")
 def list_inventory_with_cards(
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     """
     Return inventory rows joined with selected Card fields for UI display.
-    Authentication: REQUIRED.
+    Authentication: REQUIRED. Scoped to the active organization.
     """
-    target_user_id = current_user.id
-
     items = session.exec(
-        select(InventoryItem).where(InventoryItem.user_id == target_user_id)
+        select(InventoryItem).where(InventoryItem.org_id == ctx.org_id)
     ).all()
     card_ids = list({i.card_id for i in items})
     cards = {
@@ -423,6 +429,7 @@ async def import_inventory_csv(
     file: UploadFile,
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     """
     Import inventory from CSV.
@@ -459,6 +466,7 @@ async def import_inventory_csv(
 
         _merge_or_create_inventory(
             session,
+            org_id=ctx.org_id,
             user_id=target_user_id,
             card_id=cid,
             quantity=max(1, int(r.get("quantity") or 1)),
@@ -486,7 +494,7 @@ def update_inventory_item(
     item_id: int,
     updates: InventoryUpdate,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     """
     Update an inventory item's fields.
@@ -508,9 +516,9 @@ def update_inventory_item(
     if not inv:
         raise HTTPException(404, "Inventory item not found")
 
-    # Ownership validation
-    if inv.user_id != current_user.id:
-        raise HTTPException(403, "Cannot update another user's inventory item")
+    # Org-scope validation
+    if inv.org_id != ctx.org_id:
+        raise HTTPException(403, "Cannot update another organization's inventory item")
 
     # Update quantity
     if updates.quantity is not None:
@@ -546,20 +554,20 @@ def update_inventory_item(
 def delete_inventory_item(
     item_id: int,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     """
     Delete an inventory row by id.
 
-    Authentication: REQUIRED - can only delete own inventory items.
+    Authentication: REQUIRED - can only delete the active org's inventory items.
     """
     inv = session.get(InventoryItem, item_id)
     if not inv:
         raise HTTPException(404, "Inventory item not found")
 
-    # Ownership validation
-    if inv.user_id != current_user.id:
-        raise HTTPException(403, "Cannot delete another user's inventory item")
+    # Org-scope validation
+    if inv.org_id != ctx.org_id:
+        raise HTTPException(403, "Cannot delete another organization's inventory item")
 
     session.delete(inv)
     session.commit()
@@ -570,11 +578,12 @@ def delete_inventory_item(
 def export_inventory_csv(
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     """
-    Export the authenticated user's inventory as CSV, joined with Card fields.
+    Export the active organization's inventory as CSV, joined with Card fields.
 
-    Authentication: REQUIRED - exports only the authenticated user's inventory.
+    Authentication: REQUIRED - exports only the active organization's inventory.
 
     Columns:
       inventory_id, card_id, name, set_id, number, rarity, types, subtypes, stage, hp,
@@ -585,11 +594,8 @@ def export_inventory_csv(
                   generation and returning a pre-signed URL instead of streaming
                   from memory. Also consider chunked queries.
     """
-    # Always use authenticated user's ID
-    target_user_id = current_user.id
-
     items = session.exec(
-        select(InventoryItem).where(InventoryItem.user_id == target_user_id)
+        select(InventoryItem).where(InventoryItem.org_id == ctx.org_id)
     ).all()
     if not items:
         # Still return a CSV with only the header

@@ -11,6 +11,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { CheckCircle, ChevronDown, ChevronUp, Crosshair, Download, Loader2, ScanSearch } from "lucide-react";
 import { api, API_BASE } from "../../lib/api";
 import { getAuthToken } from "../../lib/authToken";
+import { orgHeader } from "../../lib/activeOrg";
 import type { GradeResult, Verdict, Dimension, FeedbackOut } from "./types";
 import TransferPanel from "./TransferPanel";
 
@@ -425,7 +426,7 @@ function DebugPanel({ resultId }: DebugPanelProps) {
     if (Object.keys(urls).length > 0 || Object.keys(errors).length > 0) return;
     setLoading(true);
     const token = await getAuthToken();
-    const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {};
+    const headers: HeadersInit = { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...orgHeader() };
     const results = await Promise.allSettled(
       DEBUG_VIEWS.map(async (view) => {
         const res = await fetch(`${API_BASE}/grading/${resultId}/debug/${view}`, { headers });
@@ -600,7 +601,7 @@ function BorderSampler({ resultId, onRecenter, onToast }: BorderSamplerProps) {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...({ ...(token ? { Authorization: `Bearer ${token}` } : {}), ...orgHeader() }),
         },
         body: JSON.stringify({ border_r: color[0], border_g: color[1], border_b: color[2] }),
       });
@@ -719,7 +720,7 @@ export default function GradeResultCard({ result, onToast, onTransferred }: Prop
     try {
       const token = await getAuthToken();
       const res = await fetch(`${API_BASE}/grading/${result.id}/report.png`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...orgHeader() },
       });
       if (!res.ok) throw new Error(`${res.status}`);
       const blob = await res.blob();

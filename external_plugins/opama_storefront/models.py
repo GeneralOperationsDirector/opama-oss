@@ -4,8 +4,14 @@ from sqlmodel import SQLModel, Field
 
 
 class StorefrontSettings(SQLModel, table=True):
-    """Per-user storefront configuration — one row per user."""
+    """Per-user storefront configuration — one row per user.
+
+    Migrating to org-owned (pool tenancy — see pool_vs_silo): a store's settings
+    belong to the Organization so staff share one storefront config. org_id is
+    nullable through the backfill migration; user_id stays as the acting user.
+    """
     id: Optional[int] = Field(default=None, primary_key=True)
+    org_id: int = Field(foreign_key="organization.id", index=True)
     user_id: int = Field(index=True, unique=True)
 
     site_name: str = Field(default="My Shop")

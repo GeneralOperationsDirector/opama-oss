@@ -113,15 +113,15 @@ def apply_grading_premium(base_price: Decimal, grade: str) -> Decimal:
 
 
 def calculate_portfolio_value(
-    user_id: int,
+    org_id: int,
     session: Session,
     use_purchase_prices: bool = False,
 ) -> Dict:
     """
-    Calculate the current value of a user's portfolio.
+    Calculate the current value of an organization's portfolio (pool tenancy).
 
     Args:
-        user_id: User to calculate for
+        org_id: Organization to calculate for (tenancy scope)
         session: Database session
         use_purchase_prices: If True, uses purchase_price from inventory
                             If False, uses market prices
@@ -129,12 +129,12 @@ def calculate_portfolio_value(
     Returns:
         Dictionary with portfolio value details
     """
-    # Get user's inventory with card details
+    # Get the org's inventory with card details
     stmt = (
         select(InventoryItem, Card, Set)
         .join(Card, InventoryItem.card_id == Card.id)
         .join(Set, Card.set_id == Set.id)
-        .where(InventoryItem.user_id == user_id)
+        .where(InventoryItem.org_id == org_id)
         .where(InventoryItem.quantity > 0)
     )
     results = session.exec(stmt).all()
@@ -233,7 +233,7 @@ def calculate_portfolio_value(
         unrealized_gain_pct = (unrealized_gain / total_cost) * Decimal("100")
 
     return {
-        "user_id": user_id,
+        "org_id": org_id,
         "total_value": total_value,
         "total_cost": total_cost,
         "unrealized_gain": unrealized_gain,
@@ -247,22 +247,24 @@ def calculate_portfolio_value(
 
 
 def create_portfolio_snapshot(
-    user_id: int,
+    org_id: int,
     session: Session,
     snapshot_type: str = "manual",
+    user_id: Optional[int] = None,
 ) -> PortfolioSnapshot:
     """
-    Create a point-in-time snapshot of portfolio value.
+    Create a point-in-time snapshot of an organization's portfolio value.
 
     Args:
-        user_id: User to snapshot
+        org_id: Organization to snapshot (tenancy scope)
         session: Database session
         snapshot_type: "manual", "auto_daily", "auto_weekly"
+        user_id: Acting user (audit/created-by); required column on the row.
 
     Returns:
         Created PortfolioSnapshot
     """
-    portfolio_data = calculate_portfolio_value(user_id, session)
+    portfolio_data = calculate_portfolio_value(org_id, session)
 
     # Calculate condition-specific values
     breakdown = portfolio_data["condition_breakdown"]
@@ -296,7 +298,8 @@ def create_portfolio_snapshot(
         top_set_value = set_values[top_set_id]
 
     snapshot = PortfolioSnapshot(
-        user_id=user_id,
+        org_id=org_id,          # owning organization (tenancy/RLS scope)
+        user_id=user_id,        # acting/created-by user (audit)
         snapshot_date=date.today(),
         snapshot_type=snapshot_type,
         total_value=portfolio_data["total_value"],
@@ -324,15 +327,15 @@ def create_portfolio_snapshot(
 
 
 def get_portfolio_history(
-    user_id: int,
+    org_id: int,
     session: Session,
     days: int = 90,
 ) -> Dict:
     """
-    Get historical portfolio values.
+    Get an organization's historical portfolio values.
 
     Args:
-        user_id: User to get history for
+        org_id: Organization to get history for (tenancy scope)
         session: Database session
         days: Number of days of history
 
@@ -343,7 +346,7 @@ def get_portfolio_history(
 
     stmt = (
         select(PortfolioSnapshot)
-        .where(PortfolioSnapshot.user_id == user_id)
+        .where(PortfolioSnapshot.org_id == org_id)
         .where(PortfolioSnapshot.snapshot_date >= cutoff_date)
         .order_by(PortfolioSnapshot.snapshot_date)
     )
@@ -379,7 +382,7 @@ def get_portfolio_history(
         }
 
     return {
-        "user_id": user_id,
+        "org_id": org_id,
         "period": {
             "start_date": cutoff_date,
             "end_date": date.today(),

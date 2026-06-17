@@ -8,15 +8,16 @@ from __future__ import annotations
 
 from services.shared.llm import ToolSpec
 from services.shared.tool_registry import ToolDefinition
+from services.auth.org_context import resolve_org_context
 from .router import insurance_summary, list_policies
 
 
 def _get_insurance_summary(session, user, args):
-    return insurance_summary(session=session, current_user=user)
+    return insurance_summary(session=session, ctx=resolve_org_context(user, session))
 
 
 def _list_insurance_policies(session, user, args):
-    return list_policies(session=session, current_user=user)
+    return list_policies(session=session, ctx=resolve_org_context(user, session))
 
 
 TOOLS = [

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from services.shared.llm import ToolSpec
 from services.shared.tool_registry import ToolDefinition
+from services.auth.org_context import resolve_org_context
 from .router import create_asset, get_asset, list_assets, list_categories, portfolio_summary, update_asset
 from .schemas import CustomAssetCreate, CustomAssetUpdate
 
@@ -40,20 +41,20 @@ def _list_assets(session, user, args):
         limit=min(int(args.get("limit", 20)), 100),
         offset=0,
         session=session,
-        current_user=user,
+        ctx=resolve_org_context(user, session),
     )
 
 
 def _get_asset(session, user, args):
-    return get_asset(asset_id=int(args["asset_id"]), session=session, current_user=user)
+    return get_asset(asset_id=int(args["asset_id"]), session=session, ctx=resolve_org_context(user, session))
 
 
 def _get_collection_summary(session, user, args):
-    return portfolio_summary(session=session, current_user=user)
+    return portfolio_summary(session=session, ctx=resolve_org_context(user, session))
 
 
 def _list_asset_categories(session, user, args):
-    return list_categories(session=session, current_user=user)
+    return list_categories(session=session, ctx=resolve_org_context(user, session))
 
 
 def _create_custom_asset(session, user, args):
@@ -66,7 +67,9 @@ def _create_custom_asset(session, user, args):
         estimated_value=args.get("estimated_value"),
         description=args.get("description"),
     )
-    return create_asset(body=body, session=session, current_user=user)
+    return create_asset(
+        body=body, session=session, current_user=user, ctx=resolve_org_context(user, session)
+    )
 
 
 def _update_asset_value(session, user, args):
@@ -75,7 +78,9 @@ def _update_asset_value(session, user, args):
         condition=args.get("condition"),
         description=args.get("description"),
     )
-    return update_asset(asset_id=int(args["asset_id"]), body=body, session=session, current_user=user)
+    return update_asset(
+        asset_id=int(args["asset_id"]), body=body, session=session, ctx=resolve_org_context(user, session)
+    )
 
 
 TOOLS = [

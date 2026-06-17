@@ -16,6 +16,8 @@ class ShopifySettings(SQLModel, table=True):
     """Per-user Shopify store configuration — one row per user."""
 
     id: Optional[int] = Field(default=None, primary_key=True)
+    # Ownership/RLS scope (pool tenancy — see pool_vs_silo); nullable through backfill.
+    org_id: int = Field(foreign_key="organization.id", index=True)
     user_id: int = Field(index=True, unique=True)
 
     shop_domain: str = Field(default="")  # e.g. "my-shop.myshopify.com"
@@ -41,6 +43,7 @@ class ShopifyProductMapping(SQLModel, table=True):
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)
+    org_id: int = Field(foreign_key="organization.id", index=True)
     user_id: int = Field(index=True)
     catalog_id: str = Field(index=True)
     shopify_product_id: str

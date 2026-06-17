@@ -22,6 +22,7 @@ from services.shared.database import get_session
 from services.shared.models import User
 from opama_pokemon_tcg.catalog.models import Card
 from services.auth.middleware import get_current_user
+from services.auth.org_context import OrgContext, get_current_org
 
 _limiter = Limiter(key_func=get_remote_address)
 from services.custom_assets.models import CustomAsset
@@ -178,6 +179,7 @@ async def analyze(
     guide_inner: Optional[str] = Query(None, description="Inner border boundary: 'x,y,w,h' in image pixels"),
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     """
     Upload a card scan.  Returns both a grade estimate and card identification.
@@ -229,6 +231,7 @@ async def analyze(
     notes_json = json.dumps(report.notes)
 
     record = CardGradeResult(
+        org_id=ctx.org_id,
         user_id=current_user.id,
         card_id=card_id,
         inventory_item_id=inventory_item_id,
@@ -344,6 +347,7 @@ def transfer(
     body: TransferIn,
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
+    org: OrgContext = Depends(get_current_org),
 ):
     """
     Create a collection item from a grading result.
@@ -359,8 +363,8 @@ def transfer(
     grade_result = session.get(CardGradeResult, result_id)
     if not grade_result:
         raise HTTPException(404, f"Grade result {result_id} not found")
-    if grade_result.user_id != current_user.id:
-        raise HTTPException(403, "Cannot transfer another user's result")
+    if grade_result.org_id != org.org_id:
+        raise HTTPException(403, "Cannot transfer another organization's result")
     if grade_result.transferred_to:
         raise HTTPException(409, f"Already transferred to {grade_result.transferred_to} (id={grade_result.transferred_item_id})")
 
@@ -377,7 +381,7 @@ def transfer(
         from opama_pokemon_tcg.inventory.models import InventoryItem
         existing = session.exec(
             select(InventoryItem).where(
-                InventoryItem.user_id == current_user.id,
+                InventoryItem.org_id == org.org_id,
                 InventoryItem.card_id == body.card_id,
                 InventoryItem.condition == body.condition,
                 InventoryItem.grade == round(body.actual_grade or grade_result.estimated_grade),
@@ -392,7 +396,8 @@ def transfer(
             item = existing
         else:
             item = InventoryItem(
-                user_id=current_user.id,
+                org_id=org.org_id,        # owning organization (tenancy scope)
+                user_id=current_user.id,  # creating/acting user (audit)
                 card_id=body.card_id,
                 quantity=body.quantity,
                 condition=body.condition,
@@ -426,7 +431,8 @@ def transfer(
         scan_url = f"/uploads/grading/{result_id}.jpg" if _scan_path(result_id).exists() else None
 
         asset = CustomAsset(
-            user_id=current_user.id,
+            org_id=org.org_id,        # owning organization (tenancy scope)
+            user_id=current_user.id,  # creating/acting user (audit)
             name=f"{name}{number_suffix}",
             category="Trading Card",
             condition=body.condition,
@@ -508,7 +514,7 @@ def transfer(
 def grade_report_image(
     result_id: int,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     """
     Return a PNG grading report for the given result.
@@ -518,8 +524,8 @@ def grade_report_image(
     result = session.get(CardGradeResult, result_id)
     if not result:
         raise HTTPException(404, f"Grade result {result_id} not found")
-    if result.user_id != current_user.id:
-        raise HTTPException(403, "Cannot access another user's result")
+    if result.org_id != ctx.org_id:
+        raise HTTPException(403, "Cannot access another organization's result")
 
     scan = _scan_path(result_id)
     scan_bytes = scan.read_bytes() if scan.exists() else None
@@ -568,7 +574,7 @@ def grade_debug_image(
     result_id: int,
     view: str,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     """
     Return a diagnostic PNG for a single grading dimension.
@@ -587,8 +593,8 @@ def grade_debug_image(
     result = session.get(CardGradeResult, result_id)
     if not result:
         raise HTTPException(404, f"Grade result {result_id} not found")
-    if result.user_id != current_user.id:
-        raise HTTPException(403, "Cannot access another user's result")
+    if result.org_id != ctx.org_id:
+        raise HTTPException(403, "Cannot access another organization's result")
 
     scan = _scan_path(result_id)
     if not scan.exists():
@@ -617,7 +623,7 @@ def recenter_with_color(
     result_id: int,
     body: RecenterIn,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     """
     Re-run the centering measurement using a border colour sampled by the user.
@@ -638,8 +644,8 @@ def recenter_with_color(
     result = session.get(CardGradeResult, result_id)
     if not result:
         raise HTTPException(404, f"Grade result {result_id} not found")
-    if result.user_id != current_user.id:
-        raise HTTPException(403, "Cannot access another user's result")
+    if result.org_id != ctx.org_id:
+        raise HTTPException(403, "Cannot access another organization's result")
 
     scan = _scan_path(result_id)
     if not scan.exists():
@@ -712,7 +718,7 @@ def recenter_with_color(
 @router.get("/provider-stats", response_model=list[ProviderStatsOut])
 def provider_stats(
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     """
     Per-provider identification accuracy, aggregated from all transfers where
@@ -722,12 +728,13 @@ def provider_stats(
     (i.e. the user has transferred the card). Attempts not yet transferred
     appear in total_attempts but not in *_evaluated counts.
     """
-    # Fetch all attempts for this user's grade results
+    # Fetch all attempts for this org's grade results (IdentificationAttempt has
+    # no org_id of its own — scope via the joined CardGradeResult).
     attempts = session.exec(
         select(IdentificationAttempt)
         .join(CardGradeResult,
               IdentificationAttempt.grade_result_id == CardGradeResult.id)
-        .where(CardGradeResult.user_id == current_user.id)
+        .where(CardGradeResult.org_id == ctx.org_id)
     ).all()
 
     if not attempts:
@@ -772,6 +779,7 @@ def submit_feedback(
     body: FeedbackIn,
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     """
     Attach human feedback to a prior grading result.
@@ -780,8 +788,8 @@ def submit_feedback(
     result = session.get(CardGradeResult, result_id)
     if not result:
         raise HTTPException(404, f"Grade result {result_id} not found")
-    if result.user_id != current_user.id:
-        raise HTTPException(403, "Cannot submit feedback on another user's result")
+    if result.org_id != ctx.org_id:
+        raise HTTPException(403, "Cannot submit feedback on another organization's result")
 
     existing = session.exec(
         select(GradeFeedback).where(
@@ -802,6 +810,7 @@ def submit_feedback(
     else:
         fb = GradeFeedback(
             grade_result_id=result_id,
+            org_id=ctx.org_id,
             user_id=current_user.id,
             overall_verdict=body.overall_verdict,
             actual_grade=body.actual_grade,
@@ -833,16 +842,16 @@ def submit_feedback(
 @router.get("/feedback/stats", response_model=FeedbackStats)
 def feedback_stats(
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     """Aggregate accuracy statistics derived from human feedback."""
     total_analyses = session.exec(
         select(func.count()).select_from(CardGradeResult)
-        .where(CardGradeResult.user_id == current_user.id)
+        .where(CardGradeResult.org_id == ctx.org_id)
     ).one()
 
     feedbacks = session.exec(
-        select(GradeFeedback).where(GradeFeedback.user_id == current_user.id)
+        select(GradeFeedback).where(GradeFeedback.org_id == ctx.org_id)
     ).all()
 
     total_feedback = len(feedbacks)
@@ -924,10 +933,10 @@ def grade_history(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
-    """Return past grade analyses for the current user, optionally filtered."""
-    stmt = select(CardGradeResult).where(CardGradeResult.user_id == current_user.id)
+    """Return past grade analyses for the current organization, optionally filtered."""
+    stmt = select(CardGradeResult).where(CardGradeResult.org_id == ctx.org_id)
     if card_id:
         stmt = stmt.where(CardGradeResult.card_id == card_id)
     if asset_id:

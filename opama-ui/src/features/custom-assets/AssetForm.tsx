@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { Plus, Trash2, Upload, X } from "lucide-react";
 import { API_BASE } from "../../lib/api";
 import { getAuthToken } from "../../lib/authToken";
+import { orgHeader } from "../../lib/activeOrg";
 import type { AssetFormData, CustomField } from "./types";
 
 const CONDITIONS = ["Mint", "Near Mint", "Excellent", "Good", "Fair", "Poor", "Damaged"];
@@ -85,7 +86,7 @@ export default function AssetForm({ userId, assetId, initial, existingCategories
       fd.append("file", file);
       const res = await fetch(`${API_BASE}/assets/${assetId}/image`, {
         method: "POST",
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...orgHeader() },
         body: fd,
       });
       if (!res.ok) throw new Error(`${res.status}`);
@@ -109,7 +110,7 @@ export default function AssetForm({ userId, assetId, initial, existingCategories
       fd.append("file", file);
       const res = await fetch(`${API_BASE}/assets/${assetId}/back-image`, {
         method: "POST",
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...orgHeader() },
         body: fd,
       });
       if (!res.ok) throw new Error(`${res.status}`);

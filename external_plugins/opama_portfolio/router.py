@@ -32,6 +32,7 @@ from services.shared.models import User
 from opama_pokemon_tcg.catalog.models import Card
 from opama_pokemon_tcg.inventory.models import InventoryItem
 from services.auth.middleware import get_current_user
+from services.auth.org_context import OrgContext, get_current_org
 from .models import (
     MarketPrice,
     SaleTransaction,
@@ -70,9 +71,10 @@ def get_portfolio_value(
     use_purchase_prices: bool = Query(False, description="Use manual purchase prices instead of market"),
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     """
-    Calculate current portfolio value for the authenticated user.
+    Calculate current portfolio value for the active organization.
 
     Combines inventory data with market prices (or manual purchase prices).
 
@@ -80,7 +82,7 @@ def get_portfolio_value(
         use_purchase_prices: If true, uses purchase_price from inventory
                            If false, uses market prices (with fallback to purchase_price)
     """
-    portfolio_data = calculate_portfolio_value(current_user.id, session, use_purchase_prices)
+    portfolio_data = calculate_portfolio_value(ctx.org_id, session, use_purchase_prices)
 
     # Format breakdown for response
     breakdown = {}
@@ -107,7 +109,7 @@ def get_portfolio_value(
     )
 
     return PortfolioValueResponse(
-        user_id=portfolio_data["user_id"],
+        user_id=current_user.id,
         total_value=portfolio_data["total_value"],
         total_cost=portfolio_data["total_cost"],
         unrealized_gain=portfolio_data["unrealized_gain"],
@@ -127,13 +129,16 @@ def create_snapshot(
     snapshot_type: str = Query("manual", description="Snapshot type: manual, auto_daily, auto_weekly"),
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     """
-    Create a point-in-time snapshot of portfolio value for the authenticated user.
+    Create a point-in-time snapshot of portfolio value for the active organization.
 
     Useful for tracking historical performance.
     """
-    snapshot = create_portfolio_snapshot(current_user.id, session, snapshot_type)
+    snapshot = create_portfolio_snapshot(
+        ctx.org_id, session, snapshot_type, user_id=current_user.id
+    )
 
     return {
         "id": snapshot.id,
@@ -151,16 +156,17 @@ def get_history(
     days: int = Query(90, ge=1, le=365, description="Number of days of history"),
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     """
-    Get historical portfolio values for the authenticated user.
+    Get historical portfolio values for the active organization.
 
     Returns snapshots and summary statistics over the requested period.
     """
-    history_data = get_portfolio_history(current_user.id, session, days)
+    history_data = get_portfolio_history(ctx.org_id, session, days)
 
     return PortfolioHistoryResponse(
-        user_id=history_data["user_id"],
+        user_id=current_user.id,
         period=history_data["period"],
         snapshots=[SnapshotSummary(**s) for s in history_data["snapshots"]],
         summary=history_data["summary"],
@@ -173,14 +179,15 @@ def get_breakdown(
     top_n: int = Query(10, ge=1, le=50, description="Number of top groups to return"),
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     """
     Get portfolio breakdown by category (set, rarity, type, or series)
-    for the authenticated user.
+    for the active organization.
 
     Useful for understanding portfolio composition and concentration.
     """
-    portfolio_data = calculate_portfolio_value(current_user.id, session)
+    portfolio_data = calculate_portfolio_value(ctx.org_id, session)
 
     # Group valuations by the requested dimension
     groups_dict = {}
@@ -248,10 +255,11 @@ def record_sale(
     sale: CreateSaleRequest,
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     """
     Record a card sale and calculate realized gain/loss for the
-    authenticated user.
+    active organization.
 
     Automatically calculates P&L based on inventory purchase price.
     """
@@ -260,11 +268,11 @@ def record_sale(
     if not card:
         raise HTTPException(404, f"Card {sale.card_id} not found")
 
-    # Get original cost from inventory if available, and verify ownership
+    # Get original cost from inventory if available, and verify org ownership
     original_cost = Decimal("0.00")
     if sale.inventory_item_id:
         inv_item = session.get(InventoryItem, sale.inventory_item_id)
-        if not inv_item or inv_item.user_id != current_user.id:
+        if not inv_item or inv_item.org_id != ctx.org_id:
             raise HTTPException(404, f"Inventory item {sale.inventory_item_id} not found")
         if inv_item.purchase_price_per_card:
             original_cost = Decimal(str(inv_item.purchase_price_per_card)) * sale.quantity_sold
@@ -281,7 +289,8 @@ def record_sale(
 
     # Create transaction
     transaction = SaleTransaction(
-        user_id=current_user.id,
+        org_id=ctx.org_id,          # owning organization (tenancy/RLS scope)
+        user_id=current_user.id,    # acting/created-by user (audit)
         card_id=sale.card_id,
         inventory_item_id=sale.inventory_item_id,
         quantity_sold=sale.quantity_sold,
@@ -338,15 +347,15 @@ def list_sales(
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     """
-    List all sales for the authenticated user, ordered by sale date (newest first).
+    List all sales for the active organization, ordered by sale date (newest first).
     """
     stmt = (
         select(SaleTransaction, Card)
         .join(Card, SaleTransaction.card_id == Card.id)
-        .where(SaleTransaction.user_id == current_user.id)
+        .where(SaleTransaction.org_id == ctx.org_id)
         .order_by(desc(SaleTransaction.sale_date))
         .limit(limit)
         .offset(offset)
@@ -379,7 +388,7 @@ def list_sales(
 def delete_sale(
     sale_id: int,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     """
     Delete a sale transaction and restore the inventory quantity.
@@ -389,7 +398,7 @@ def delete_sale(
     """
     # Get the sale transaction
     sale = session.get(SaleTransaction, sale_id)
-    if not sale or sale.user_id != current_user.id:
+    if not sale or sale.org_id != ctx.org_id:
         raise HTTPException(404, f"Sale transaction {sale_id} not found")
 
     # If this sale had an inventory item, restore the quantity
@@ -422,13 +431,14 @@ def get_realized_gains_summary(
     days: Optional[int] = Query(None, ge=1, le=3650, description="Optional: limit to last N days"),
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     """
-    Get summary of realized gains/losses from sales for the authenticated user.
+    Get summary of realized gains/losses from sales for the active organization.
 
     Provides overall P&L statistics and identifies best/worst sales.
     """
-    stmt = select(SaleTransaction).where(SaleTransaction.user_id == current_user.id)
+    stmt = select(SaleTransaction).where(SaleTransaction.org_id == ctx.org_id)
 
     # Optional date filter
     if days:

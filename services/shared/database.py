@@ -42,6 +42,11 @@ engine = create_engine(DB_URL, connect_args=connect_args)
 
 _is_sqlite = DB_URL.startswith("sqlite")
 
+# Register the RLS active-org GUC listener (pool tenancy). Import for its side
+# effect: the `after_begin` hook that re-applies `app.current_org_id` per
+# transaction. No-op on non-Postgres binds / unstamped sessions.
+from services.shared import rls  # noqa: E402,F401
+
 
 # ---------------------------------------------------------------------------
 # SQLite PRAGMAs

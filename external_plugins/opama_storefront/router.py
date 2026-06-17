@@ -23,6 +23,7 @@ from services.shared.audit import write_audit_log
 from services.shared.database import get_session
 from services.shared.models import User
 from services.auth.middleware import get_current_user
+from services.auth.org_context import OrgContext, get_current_org
 from services.custom_assets.models import CustomAsset, CustomAssetField
 from services.custom_assets.router import _category_slug
 from services.github_publish.client import get_publish_config, commit_file
@@ -102,9 +103,9 @@ def _build_catalog_entry(
     }
 
 
-def _get_settings(user_id: int, session: Session) -> Optional[StorefrontSettings]:
+def _get_settings(org_id: int, session: Session) -> Optional[StorefrontSettings]:
     return session.exec(
-        select(StorefrontSettings).where(StorefrontSettings.user_id == user_id)
+        select(StorefrontSettings).where(StorefrontSettings.org_id == org_id)
     ).first()
 
 
@@ -128,9 +129,9 @@ def _settings_out(s: StorefrontSettings) -> StorefrontSettingsOut:
 @router.get("/settings", response_model=StorefrontSettingsOut)
 def get_settings(
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
-    s = _get_settings(current_user.id, session)
+    s = _get_settings(ctx.org_id, session)
     if not s:
         raise HTTPException(404, "Storefront not configured yet")
     return _settings_out(s)
@@ -142,8 +143,9 @@ def upsert_settings(
     request: Request,
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
-    s = _get_settings(current_user.id, session)
+    s = _get_settings(ctx.org_id, session)
     data = body.model_dump()
 
     # SSRF protection: validate webhook_url before saving
@@ -159,7 +161,8 @@ def upsert_settings(
             setattr(s, field, val)
         s.updated_at = datetime.utcnow().isoformat()
     else:
-        s = StorefrontSettings(user_id=current_user.id, **data)
+        # org_id = owning organization (tenancy scope); user_id = creator (audit)
+        s = StorefrontSettings(org_id=ctx.org_id, user_id=current_user.id, **data)
 
     session.add(s)
     session.commit()
@@ -182,13 +185,13 @@ def upsert_settings(
 def test_image_url(
     body: ImageUrlTestRequest,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     """Check that `public_api_url` is reachable and serves an item image.
 
-    Picks one of the user's listed assets that has an image and fetches it
+    Picks one of the org's listed assets that has an image and fetches it
     through the candidate public URL — the same path the storefront site
-    will use. Falls back to `/healthz` if the user has no item images yet.
+    will use. Falls back to `/healthz` if the org has no item images yet.
     """
     base = body.public_api_url.rstrip("/")
     if not base:
@@ -201,7 +204,7 @@ def test_image_url(
 
     asset = session.exec(
         select(CustomAsset).where(
-            CustomAsset.user_id == current_user.id,
+            CustomAsset.org_id == ctx.org_id,
             CustomAsset.image_url.is_not(None),
         )
     ).first()
@@ -223,11 +226,11 @@ def test_image_url(
 @router.get("/listings")
 def get_listings(
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     assets = session.exec(
         select(CustomAsset).where(
-            CustomAsset.user_id == current_user.id,
+            CustomAsset.org_id == ctx.org_id,
             CustomAsset.listed_on_website == True,  # noqa: E712
         ).order_by(CustomAsset.updated_at.desc())
     ).all()
@@ -247,12 +250,12 @@ def patch_listing(
     asset_id: int,
     body: StorefrontListingPatch,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     asset = session.get(CustomAsset, asset_id)
     if not asset:
         raise HTTPException(404, "Asset not found")
-    if asset.user_id != current_user.id:
+    if asset.org_id != ctx.org_id:
         raise HTTPException(403, "Forbidden")
     for field, val in body.model_dump(exclude_unset=True).items():
         setattr(asset, field, val)
@@ -268,11 +271,11 @@ def patch_listing(
 @router.get("/sales")
 def get_sales(
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     sold = session.exec(
         select(CustomAsset).where(
-            CustomAsset.user_id == current_user.id,
+            CustomAsset.org_id == ctx.org_id,
             CustomAsset.sale_date != None,  # noqa: E711
         ).order_by(CustomAsset.sale_date.desc())
     ).all()
@@ -296,11 +299,11 @@ def get_sales(
 @router.get("/publish/preview")
 def preview_catalog(
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
-    s = _get_settings(current_user.id, session)
+    s = _get_settings(ctx.org_id, session)
     public_base = s.public_api_url if s else ""
-    catalog, sold_count = _generate_catalog(current_user.id, session, public_base)
+    catalog, sold_count = _generate_catalog(ctx.org_id, session, public_base)
     return {
         "item_count": len(catalog),
         "sold_count": sold_count,
@@ -313,6 +316,7 @@ def publish_catalog(
     request: Request,
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     """Build the catalog and push it to the first configured target that works.
 
@@ -322,9 +326,9 @@ def publish_catalog(
     there for local dev or non-GitHub setups. `error_msg` holds the failure
     from the last target tried when none succeed.
     """
-    s = _get_settings(current_user.id, session)
+    s = _get_settings(ctx.org_id, session)
     public_base = s.public_api_url if s else ""
-    catalog, sold_count = _generate_catalog(current_user.id, session, public_base)
+    catalog, sold_count = _generate_catalog(ctx.org_id, session, public_base)
     catalog_json = json.dumps(catalog, indent=2, ensure_ascii=False)
 
     published = False
@@ -410,13 +414,13 @@ def publish_catalog(
 # signature/return shape stable, or update that plugin in lockstep. See
 # external_plugins/opama_shopify/README.md "Dependencies".
 def _generate_catalog(
-    user_id: int,
+    org_id: int,
     session: Session,
     public_base: str,
 ) -> tuple[list[dict], int]:
     assets = session.exec(
         select(CustomAsset).where(
-            CustomAsset.user_id == user_id,
+            CustomAsset.org_id == org_id,
             CustomAsset.listed_on_website == True,  # noqa: E712
         )
     ).all()

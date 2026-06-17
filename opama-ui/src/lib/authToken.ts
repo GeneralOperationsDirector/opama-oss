@@ -12,6 +12,7 @@
  ******************************************************************* */
 
 import { auth } from "./firebase";
+import { orgHeader } from "./activeOrg";
 
 const API_BASE: string =
   (import.meta as any).env?.VITE_API_BASE ?? "http://localhost:8008";
@@ -68,4 +69,17 @@ export async function getAuthToken(): Promise<string | null> {
   }
 
   return getStoredLocalToken();
+}
+
+/**
+ * Headers for an authenticated API request: the bearer token plus the active-org
+ * header (`X-Org-Id`). The single place both lib/api.ts and the raw-fetch
+ * multipart upload call sites build request headers, so org scoping is uniform.
+ */
+export async function getRequestHeaders(): Promise<Record<string, string>> {
+  const token = await getAuthToken();
+  return {
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...orgHeader(),
+  };
 }

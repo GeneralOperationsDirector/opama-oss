@@ -11,6 +11,7 @@ from sqlmodel import Session, select
 from services.shared.llm import ToolSpec
 from services.shared.models import User
 from services.shared.tool_registry import ToolDefinition
+from services.auth.org_context import resolve_org_context
 from opama_pokemon_tcg.inventory.models import InventoryItem
 from opama_pokemon_tcg.catalog.models import Card
 
@@ -19,8 +20,9 @@ def _list_pokemon_inventory(session: Session, user: User, args: dict):
     q = args.get("q", "").strip().lower()
     limit = min(int(args.get("limit", 50)), 200)
 
+    org_id = resolve_org_context(user, session).org_id
     items = session.exec(
-        select(InventoryItem).where(InventoryItem.user_id == user.id)
+        select(InventoryItem).where(InventoryItem.org_id == org_id)
     ).all()
 
     card_ids = list({i.card_id for i in items})
@@ -59,8 +61,9 @@ def _list_pokemon_inventory(session: Session, user: User, args: dict):
 
 
 def _get_pokemon_inventory_summary(session: Session, user: User, args: dict):
+    org_id = resolve_org_context(user, session).org_id
     items = session.exec(
-        select(InventoryItem).where(InventoryItem.user_id == user.id)
+        select(InventoryItem).where(InventoryItem.org_id == org_id)
     ).all()
 
     total_unique = len(items)

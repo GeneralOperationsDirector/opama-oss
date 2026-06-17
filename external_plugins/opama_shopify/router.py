@@ -20,6 +20,7 @@ from services.shared.audit import write_audit_log
 from services.shared.database import get_session
 from services.shared.models import User
 from services.auth.middleware import get_current_user
+from services.auth.org_context import OrgContext, get_current_org
 from opama_storefront.models import StorefrontSettings
 from opama_storefront.router import _generate_catalog
 
@@ -39,9 +40,9 @@ _SHOP_DOMAIN_RE = re.compile(r"^[a-z0-9][a-z0-9\-]*\.myshopify\.com$")
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
-def _get_settings(user_id: int, session: Session) -> Optional[ShopifySettings]:
+def _get_settings(org_id: int, session: Session) -> Optional[ShopifySettings]:
     return session.exec(
-        select(ShopifySettings).where(ShopifySettings.user_id == user_id)
+        select(ShopifySettings).where(ShopifySettings.org_id == org_id)
     ).first()
 
 
@@ -65,14 +66,14 @@ def _settings_out(s: ShopifySettings) -> ShopifySettingsOut:
     )
 
 
-def _catalog_for_publish(user_id: int, session: Session) -> tuple[list[dict], int]:
-    """Build the storefront catalog using the user's public_api_url (if any)
+def _catalog_for_publish(org_id: int, session: Session) -> tuple[list[dict], int]:
+    """Build the storefront catalog using the org's public_api_url (if any)
     so image URLs are absolute — Shopify fetches `images[].src` itself."""
     storefront_settings = session.exec(
-        select(StorefrontSettings).where(StorefrontSettings.user_id == user_id)
+        select(StorefrontSettings).where(StorefrontSettings.org_id == org_id)
     ).first()
     public_base = storefront_settings.public_api_url if storefront_settings else ""
-    return _generate_catalog(user_id, session, public_base)
+    return _generate_catalog(org_id, session, public_base)
 
 
 def _build_shopify_product(entry: dict) -> dict:
@@ -100,9 +101,9 @@ def _build_shopify_product(entry: dict) -> dict:
 @router.get("/settings", response_model=ShopifySettingsOut)
 def get_settings(
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
-    s = _get_settings(current_user.id, session)
+    s = _get_settings(ctx.org_id, session)
     if not s:
         raise HTTPException(404, "Shopify not configured yet")
     return _settings_out(s)
@@ -114,8 +115,9 @@ def upsert_settings(
     request: Request,
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
-    s = _get_settings(current_user.id, session)
+    s = _get_settings(ctx.org_id, session)
     data = body.model_dump()
 
     if data["shop_domain"] and not _SHOP_DOMAIN_RE.match(data["shop_domain"]):
@@ -134,7 +136,8 @@ def upsert_settings(
             setattr(s, field, val)
         s.updated_at = datetime.utcnow().isoformat()
     else:
-        s = ShopifySettings(user_id=current_user.id, **data)
+        # org_id = owning organization (tenancy scope); user_id = creator (audit)
+        s = ShopifySettings(org_id=ctx.org_id, user_id=current_user.id, **data)
 
     session.add(s)
     session.commit()
@@ -158,10 +161,10 @@ def upsert_settings(
 @router.post("/settings/test")
 def test_connection(
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     """Verify the configured shop_domain/access_token via GET /shop.json."""
-    s = _get_settings(current_user.id, session)
+    s = _get_settings(ctx.org_id, session)
     if not s or not s.shop_domain or not s.access_token:
         raise HTTPException(422, "Shopify is not configured yet")
     client = ShopifyClient(s.shop_domain, decrypt_secret_safe(s.access_token))
@@ -177,12 +180,12 @@ def test_connection(
 @router.get("/publish/preview")
 def preview_publish(
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     """Preview the Shopify product payloads /shopify/publish would send,
     without contacting Shopify. Sold items are skipped — Shopify has no
     direct equivalent of catalog.json's `sold` flag in this v1."""
-    catalog, sold_count = _catalog_for_publish(current_user.id, session)
+    catalog, sold_count = _catalog_for_publish(ctx.org_id, session)
     products = [_build_shopify_product(e) for e in catalog if not e["sold"]]
     return {
         "item_count": len(products),
@@ -196,6 +199,7 @@ def publish_to_shopify(
     request: Request,
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     """Create or update a Shopify product for every active (unsold) listing.
 
@@ -203,12 +207,12 @@ def publish_to_shopify(
     product id so re-publishing updates the existing product instead of
     creating duplicates.
     """
-    s = _get_settings(current_user.id, session)
+    s = _get_settings(ctx.org_id, session)
     if not s or not s.shop_domain or not s.access_token:
         raise HTTPException(422, "Shopify is not configured yet")
 
     client = ShopifyClient(s.shop_domain, decrypt_secret_safe(s.access_token))
-    catalog, sold_count = _catalog_for_publish(current_user.id, session)
+    catalog, sold_count = _catalog_for_publish(ctx.org_id, session)
 
     created = updated = 0
     errors: list[str] = []
@@ -219,7 +223,7 @@ def publish_to_shopify(
         product = _build_shopify_product(entry)
         mapping = session.exec(
             select(ShopifyProductMapping).where(
-                ShopifyProductMapping.user_id == current_user.id,
+                ShopifyProductMapping.org_id == ctx.org_id,
                 ShopifyProductMapping.catalog_id == entry["id"],
             )
         ).first()
@@ -232,6 +236,7 @@ def publish_to_shopify(
             else:
                 result = client.create_product(product)
                 session.add(ShopifyProductMapping(
+                    org_id=ctx.org_id,
                     user_id=current_user.id,
                     catalog_id=entry["id"],
                     shopify_product_id=str(result["id"]),

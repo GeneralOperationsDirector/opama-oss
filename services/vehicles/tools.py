@@ -8,15 +8,18 @@ from __future__ import annotations
 
 from services.shared.llm import ToolSpec
 from services.shared.tool_registry import ToolDefinition
+from services.auth.org_context import resolve_org_context
 from .router import list_service_records, vehicle_summary
 
 
 def _get_vehicle_summary(session, user, args):
-    return vehicle_summary(session=session, current_user=user)
+    return vehicle_summary(session=session, ctx=resolve_org_context(user, session))
 
 
 def _list_vehicle_service_records(session, user, args):
-    return list_service_records(asset_id=args.get("asset_id"), session=session, current_user=user)
+    return list_service_records(
+        asset_id=args.get("asset_id"), session=session, ctx=resolve_org_context(user, session)
+    )
 
 
 TOOLS = [

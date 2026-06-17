@@ -41,6 +41,9 @@ class InventoryItem(SQLModel, table=True):
     """
 
     id: int = Field(default=None, primary_key=True)
+    # Ownership/RLS scope (pool tenancy — see pool_vs_silo). user_id kept as the
+    # acting/created-by user; nullable through the backfill migration.
+    org_id: int = Field(foreign_key="organization.id", index=True)
     user_id: int = Field(foreign_key="user.id")
     card_id: str = Field(foreign_key="card.id")
     quantity: int = Field(default=1)  # TODO(validate): ensure >= 0 at API layer.

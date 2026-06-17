@@ -18,6 +18,7 @@ from opama_pokemon_tcg.trading.models import WishList, TradeItem
 from services.shared.models import User
 from opama_pokemon_tcg.catalog.models import Card
 from services.auth.middleware import get_current_user
+from services.auth.org_context import OrgContext, get_current_org
 
 router = APIRouter(prefix="/user", tags=["wish & trade"])
 
@@ -37,12 +38,13 @@ def get_wishlist(
     user_id: int,
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     _assert_owner(current_user, user_id)
     q = (
         select(WishList, Card)
         .join(Card, Card.id == WishList.card_id)
-        .where(WishList.user_id == user_id)
+        .where(WishList.org_id == ctx.org_id)
         .order_by(Card.name)
     )
     rows = session.exec(q).all()
@@ -55,6 +57,7 @@ def add_wishlist(
     card_id: str,
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     _assert_owner(current_user, user_id)
 
@@ -62,12 +65,12 @@ def add_wishlist(
         raise HTTPException(status_code=404, detail=f"Card {card_id} not found")
 
     exists = session.exec(
-        select(WishList).where(WishList.user_id == user_id, WishList.card_id == card_id)
+        select(WishList).where(WishList.org_id == ctx.org_id, WishList.card_id == card_id)
     ).first()
     if exists:
         return {"ok": True, "id": exists.id}
 
-    wl = WishList(user_id=user_id, card_id=card_id)
+    wl = WishList(org_id=ctx.org_id, user_id=user_id, card_id=card_id)
     session.add(wl)
     session.commit()
     session.refresh(wl)
@@ -80,11 +83,12 @@ def remove_wishlist(
     card_id: str,
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     _assert_owner(current_user, user_id)
 
     wl = session.exec(
-        select(WishList).where(WishList.user_id == user_id, WishList.card_id == card_id)
+        select(WishList).where(WishList.org_id == ctx.org_id, WishList.card_id == card_id)
     ).first()
     if not wl:
         raise HTTPException(status_code=404, detail="Not in wishlist")
@@ -103,12 +107,13 @@ def get_trade(
     user_id: int,
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     _assert_owner(current_user, user_id)
     q = (
         select(TradeItem, Card)
         .join(Card, Card.id == TradeItem.card_id)
-        .where(TradeItem.user_id == user_id)
+        .where(TradeItem.org_id == ctx.org_id)
         .order_by(Card.name)
     )
     rows = session.exec(q).all()
@@ -123,6 +128,7 @@ def upsert_trade(
     condition: str | None = None,
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     _assert_owner(current_user, user_id)
 
@@ -131,7 +137,7 @@ def upsert_trade(
 
     t = session.exec(
         select(TradeItem).where(
-            TradeItem.user_id == user_id, TradeItem.card_id == card_id
+            TradeItem.org_id == ctx.org_id, TradeItem.card_id == card_id
         )
     ).first()
     if t:
@@ -139,7 +145,11 @@ def upsert_trade(
         t.condition = condition
     else:
         t = TradeItem(
-            user_id=user_id, card_id=card_id, quantity=quantity, condition=condition
+            org_id=ctx.org_id,
+            user_id=user_id,
+            card_id=card_id,
+            quantity=quantity,
+            condition=condition,
         )
         session.add(t)
 
@@ -154,12 +164,13 @@ def remove_trade(
     card_id: str,
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     _assert_owner(current_user, user_id)
 
     t = session.exec(
         select(TradeItem).where(
-            TradeItem.user_id == user_id, TradeItem.card_id == card_id
+            TradeItem.org_id == ctx.org_id, TradeItem.card_id == card_id
         )
     ).first()
     if not t:

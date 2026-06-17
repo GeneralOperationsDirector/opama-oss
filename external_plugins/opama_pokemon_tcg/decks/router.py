@@ -2,9 +2,9 @@
 Decks API router — Pokémon TCG deck building (mounted at /decks).
 
 CRUD for a user's decks and the cards within them. Every endpoint requires auth
-and enforces ownership via `_assert_deck_owner()`; card adds are idempotent
-(merge-on-duplicate by deck + card). Card *suggestions* live in the separate
-`opama_ai` router, not here.
+and is scoped to the active organization (pool tenancy) via `_assert_deck_access()`;
+card adds are idempotent (merge-on-duplicate by deck + card). Card *suggestions*
+live in the separate `opama_ai` router, not here.
 """
 from typing import List, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException
@@ -15,13 +15,14 @@ from services.shared.models import User
 from opama_pokemon_tcg.decks.models import Deck, DeckCard
 from opama_pokemon_tcg.catalog.models import Card
 from services.auth.middleware import get_current_user
+from services.auth.org_context import OrgContext, get_current_org
 
 router = APIRouter()
 
 
-def _assert_deck_owner(deck: Deck, current_user: User) -> None:
-    if deck.user_id != current_user.id:
-        raise HTTPException(403, "Cannot access another user's deck")
+def _assert_deck_access(deck: Deck, ctx: OrgContext) -> None:
+    if deck.org_id != ctx.org_id:
+        raise HTTPException(403, "Cannot access another organization's deck")
 
 
 # ---------------------------------------------------------------------------
@@ -32,10 +33,10 @@ def _assert_deck_owner(deck: Deck, current_user: User) -> None:
 @router.get("")
 def list_decks(
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ) -> List[Deck]:
-    """List decks for the authenticated user, newest-first."""
-    q = select(Deck).where(Deck.user_id == current_user.id)
+    """List decks for the active organization, newest-first."""
+    q = select(Deck).where(Deck.org_id == ctx.org_id)
     return session.exec(q.order_by(Deck.id.desc())).all()
 
 
@@ -44,9 +45,10 @@ def create_deck(
     payload: Dict[str, Any],
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ) -> Deck:
     """
-    Create a new deck for the authenticated user.
+    Create a new deck in the active organization.
 
     Payload:
       - name (str, required)
@@ -58,7 +60,12 @@ def create_deck(
     if not name:
         raise HTTPException(422, "name is required")
 
-    deck = Deck(user_id=current_user.id, name=name, format=fmt)
+    deck = Deck(
+        org_id=ctx.org_id,            # owning organization (tenancy/RLS scope)
+        user_id=current_user.id,      # creating/acting user (audit)
+        name=name,
+        format=fmt,
+    )
     session.add(deck)
     session.commit()
     session.refresh(deck)
@@ -69,13 +76,13 @@ def create_deck(
 def get_deck(
     deck_id: int,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     """Get a deck and its cards (hydrated with minimal card info)."""
     deck = session.get(Deck, deck_id)
     if not deck:
         raise HTTPException(404, "Deck not found")
-    _assert_deck_owner(deck, current_user)
+    _assert_deck_access(deck, ctx)
 
     dcs: List[DeckCard] = session.exec(
         select(DeckCard).where(DeckCard.deck_id == deck_id)
@@ -118,13 +125,13 @@ def rename_deck(
     deck_id: int,
     payload: Dict[str, Any],
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     """Rename a deck and/or update its format."""
     deck = session.get(Deck, deck_id)
     if not deck:
         raise HTTPException(404, "Deck not found")
-    _assert_deck_owner(deck, current_user)
+    _assert_deck_access(deck, ctx)
 
     if "name" in payload and payload["name"]:
         deck.name = str(payload["name"])
@@ -141,13 +148,13 @@ def rename_deck(
 def delete_deck(
     deck_id: int,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     """Delete a deck and its DeckCards."""
     deck = session.get(Deck, deck_id)
     if not deck:
         raise HTTPException(404, "Deck not found")
-    _assert_deck_owner(deck, current_user)
+    _assert_deck_access(deck, ctx)
 
     for dc in session.exec(select(DeckCard).where(DeckCard.deck_id == deck_id)).all():
         session.delete(dc)
@@ -167,13 +174,13 @@ def add_deck_card(
     deck_id: int,
     payload: Dict[str, Any],
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     """Add a card to a deck (idempotent: existing card increments quantity)."""
     deck = session.get(Deck, deck_id)
     if not deck:
         raise HTTPException(404, "Deck not found")
-    _assert_deck_owner(deck, current_user)
+    _assert_deck_access(deck, ctx)
 
     card_id = str(payload.get("card_id") or "").strip()
     qty = int(payload.get("quantity") or 1)
@@ -224,7 +231,7 @@ def patch_deck_card(
     deck_card_id: int,
     payload: Dict[str, Any],
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     """Update quantity or role of a DeckCard. Deletes row if quantity reaches 0."""
     dc = session.get(DeckCard, deck_card_id)
@@ -232,7 +239,7 @@ def patch_deck_card(
         raise HTTPException(404, "Deck card not found")
 
     deck = session.get(Deck, deck_id)
-    _assert_deck_owner(deck, current_user)
+    _assert_deck_access(deck, ctx)
 
     qd = int(payload.get("quantity_delta") or 0)
     if qd != 0:
@@ -256,7 +263,7 @@ def delete_deck_card(
     deck_id: int,
     deck_card_id: int,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     """Remove a single DeckCard row from the deck."""
     dc = session.get(DeckCard, deck_card_id)
@@ -264,7 +271,7 @@ def delete_deck_card(
         raise HTTPException(404, "Deck card not found")
 
     deck = session.get(Deck, deck_id)
-    _assert_deck_owner(deck, current_user)
+    _assert_deck_access(deck, ctx)
 
     session.delete(dc)
     session.commit()

@@ -23,6 +23,8 @@ from sqlmodel import SQLModel, Field
 
 class InsurancePolicy(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
+    # Ownership/RLS scope (pool tenancy — see pool_vs_silo); nullable through backfill.
+    org_id: int = Field(foreign_key="organization.id", index=True)
     user_id: int = Field(index=True)
 
     provider: str
@@ -47,6 +49,7 @@ class InsurancePolicy(SQLModel, table=True):
 
 class Appraisal(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
+    org_id: int = Field(foreign_key="organization.id", index=True)
     user_id: int = Field(index=True)
     asset_id: Optional[int] = Field(default=None, foreign_key="customasset.id", index=True)
 
@@ -64,6 +67,7 @@ class Appraisal(SQLModel, table=True):
 
 class PolicyItem(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
+    org_id: int = Field(foreign_key="organization.id", index=True)
     policy_id: int = Field(foreign_key="insurancepolicy.id", index=True)
     user_id: int = Field(index=True)
     asset_id: Optional[int] = Field(default=None, foreign_key="customasset.id", index=True)

@@ -23,6 +23,8 @@ from sqlmodel import SQLModel, Field
 
 class MortgageLoan(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
+    # Ownership/RLS scope (pool tenancy — see pool_vs_silo); nullable through backfill.
+    org_id: int = Field(foreign_key="organization.id", index=True)
     user_id: int = Field(index=True)
     asset_id: int = Field(foreign_key="customasset.id", ondelete="CASCADE", index=True)
 
@@ -45,6 +47,7 @@ class MortgageLoan(SQLModel, table=True):
 
 class PropertyValuation(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
+    org_id: int = Field(foreign_key="organization.id", index=True)
     user_id: int = Field(index=True)
     asset_id: int = Field(foreign_key="customasset.id", ondelete="CASCADE", index=True)
 
@@ -62,6 +65,7 @@ class PropertyValuation(SQLModel, table=True):
 
 class PropertyTaxRecord(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
+    org_id: int = Field(foreign_key="organization.id", index=True)
     user_id: int = Field(index=True)
     asset_id: int = Field(foreign_key="customasset.id", ondelete="CASCADE", index=True)
 

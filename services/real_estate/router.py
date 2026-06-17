@@ -18,6 +18,7 @@ from sqlmodel import Session, select
 from services.shared.database import get_session
 from services.shared.models import User
 from services.auth.middleware import get_current_user
+from services.auth.org_context import OrgContext, get_current_org
 from services.custom_assets.models import CustomAsset
 from .models import MortgageLoan, PropertyTaxRecord, PropertyValuation
 from .schemas import (
@@ -44,17 +45,17 @@ _MAX_DOC_BYTES = 10 * 1024 * 1024  # 10 MB
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _assert_owner(row, current_user: User) -> None:
-    if row.user_id != current_user.id:
-        raise HTTPException(403, "Cannot access another user's record")
+def _assert_owner(row, ctx: OrgContext) -> None:
+    if row.org_id != ctx.org_id:
+        raise HTTPException(403, "Cannot access another organization's record")
 
 
-def _validate_asset_id(asset_id: int, session: Session, current_user: User) -> None:
+def _validate_asset_id(asset_id: int, session: Session, ctx: OrgContext) -> None:
     asset = session.get(CustomAsset, asset_id)
     if not asset:
         raise HTTPException(404, f"Asset {asset_id} not found")
-    if asset.user_id != current_user.id:
-        raise HTTPException(403, "Cannot link another user's asset")
+    if asset.org_id != ctx.org_id:
+        raise HTTPException(403, "Cannot link another organization's asset")
 
 
 def _mortgage_out(loan: MortgageLoan) -> MortgageLoanOut:
@@ -98,21 +99,21 @@ def _cleanup_document(subdir: str, record_id: int) -> None:
 @router.get("/summary", response_model=RealEstateSummary)
 def real_estate_summary(
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     property_count = len(session.exec(
         select(CustomAsset)
-        .where(CustomAsset.user_id == current_user.id)
+        .where(CustomAsset.org_id == ctx.org_id)
         .where(CustomAsset.category.ilike("real estate"))
     ).all())
 
     loans = session.exec(
-        select(MortgageLoan).where(MortgageLoan.user_id == current_user.id)
+        select(MortgageLoan).where(MortgageLoan.org_id == ctx.org_id)
     ).all()
     total_mortgage_balance = sum(l.current_balance or 0 for l in loans)
 
     valuations = session.exec(
-        select(PropertyValuation).where(PropertyValuation.user_id == current_user.id)
+        select(PropertyValuation).where(PropertyValuation.org_id == ctx.org_id)
     ).all()
     # Most recent valuation per asset (by valuation_date, falling back to id),
     # summed — avoids double-counting historical valuations.
@@ -129,7 +130,7 @@ def real_estate_summary(
     total_valuation = sum(v.valuation_amount for v in latest_by_asset.values())
 
     tax_records = session.exec(
-        select(PropertyTaxRecord).where(PropertyTaxRecord.user_id == current_user.id)
+        select(PropertyTaxRecord).where(PropertyTaxRecord.org_id == ctx.org_id)
     ).all()
     today = date.today().isoformat()
     cutoff = (date.today() + timedelta(days=60)).isoformat()
@@ -155,9 +156,9 @@ def real_estate_summary(
 def list_mortgages(
     asset_id: Optional[int] = Query(None),
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
-    stmt = select(MortgageLoan).where(MortgageLoan.user_id == current_user.id)
+    stmt = select(MortgageLoan).where(MortgageLoan.org_id == ctx.org_id)
     if asset_id is not None:
         stmt = stmt.where(MortgageLoan.asset_id == asset_id)
     stmt = stmt.order_by(MortgageLoan.created_at.desc())
@@ -170,10 +171,11 @@ def create_mortgage(
     body: MortgageLoanCreate,
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
-    _validate_asset_id(body.asset_id, session, current_user)
+    _validate_asset_id(body.asset_id, session, ctx)
 
-    loan = MortgageLoan(user_id=current_user.id, **body.model_dump())
+    loan = MortgageLoan(org_id=ctx.org_id, user_id=current_user.id, **body.model_dump())
     session.add(loan)
     session.commit()
     session.refresh(loan)
@@ -185,16 +187,16 @@ def update_mortgage(
     loan_id: int,
     body: MortgageLoanUpdate,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     loan = session.get(MortgageLoan, loan_id)
     if not loan:
         raise HTTPException(404, f"Mortgage {loan_id} not found")
-    _assert_owner(loan, current_user)
+    _assert_owner(loan, ctx)
 
     updates = body.model_dump(exclude_unset=True)
     if "asset_id" in updates:
-        _validate_asset_id(updates["asset_id"], session, current_user)
+        _validate_asset_id(updates["asset_id"], session, ctx)
 
     for field, val in updates.items():
         setattr(loan, field, val)
@@ -210,12 +212,12 @@ def update_mortgage(
 def delete_mortgage(
     loan_id: int,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     loan = session.get(MortgageLoan, loan_id)
     if not loan:
         raise HTTPException(404, f"Mortgage {loan_id} not found")
-    _assert_owner(loan, current_user)
+    _assert_owner(loan, ctx)
 
     session.delete(loan)
     session.commit()
@@ -227,12 +229,12 @@ async def upload_mortgage_document(
     loan_id: int,
     file: UploadFile = File(...),
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     loan = session.get(MortgageLoan, loan_id)
     if not loan:
         raise HTTPException(404, f"Mortgage {loan_id} not found")
-    _assert_owner(loan, current_user)
+    _assert_owner(loan, ctx)
 
     url, filename = await _save_document("mortgages", loan_id, file)
     loan.document_url = url
@@ -251,9 +253,9 @@ async def upload_mortgage_document(
 def list_valuations(
     asset_id: Optional[int] = Query(None),
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
-    stmt = select(PropertyValuation).where(PropertyValuation.user_id == current_user.id)
+    stmt = select(PropertyValuation).where(PropertyValuation.org_id == ctx.org_id)
     if asset_id is not None:
         stmt = stmt.where(PropertyValuation.asset_id == asset_id)
     stmt = stmt.order_by(PropertyValuation.created_at.desc())
@@ -266,10 +268,11 @@ def create_valuation(
     body: PropertyValuationCreate,
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
-    _validate_asset_id(body.asset_id, session, current_user)
+    _validate_asset_id(body.asset_id, session, ctx)
 
-    valuation = PropertyValuation(user_id=current_user.id, **body.model_dump())
+    valuation = PropertyValuation(org_id=ctx.org_id, user_id=current_user.id, **body.model_dump())
     session.add(valuation)
     session.commit()
     session.refresh(valuation)
@@ -281,16 +284,16 @@ def update_valuation(
     valuation_id: int,
     body: PropertyValuationUpdate,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     valuation = session.get(PropertyValuation, valuation_id)
     if not valuation:
         raise HTTPException(404, f"Valuation {valuation_id} not found")
-    _assert_owner(valuation, current_user)
+    _assert_owner(valuation, ctx)
 
     updates = body.model_dump(exclude_unset=True)
     if "asset_id" in updates:
-        _validate_asset_id(updates["asset_id"], session, current_user)
+        _validate_asset_id(updates["asset_id"], session, ctx)
 
     for field, val in updates.items():
         setattr(valuation, field, val)
@@ -306,12 +309,12 @@ def update_valuation(
 def delete_valuation(
     valuation_id: int,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     valuation = session.get(PropertyValuation, valuation_id)
     if not valuation:
         raise HTTPException(404, f"Valuation {valuation_id} not found")
-    _assert_owner(valuation, current_user)
+    _assert_owner(valuation, ctx)
 
     session.delete(valuation)
     session.commit()
@@ -323,12 +326,12 @@ async def upload_valuation_document(
     valuation_id: int,
     file: UploadFile = File(...),
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     valuation = session.get(PropertyValuation, valuation_id)
     if not valuation:
         raise HTTPException(404, f"Valuation {valuation_id} not found")
-    _assert_owner(valuation, current_user)
+    _assert_owner(valuation, ctx)
 
     url, filename = await _save_document("valuations", valuation_id, file)
     valuation.document_url = url
@@ -347,9 +350,9 @@ async def upload_valuation_document(
 def list_tax_records(
     asset_id: Optional[int] = Query(None),
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
-    stmt = select(PropertyTaxRecord).where(PropertyTaxRecord.user_id == current_user.id)
+    stmt = select(PropertyTaxRecord).where(PropertyTaxRecord.org_id == ctx.org_id)
     if asset_id is not None:
         stmt = stmt.where(PropertyTaxRecord.asset_id == asset_id)
     stmt = stmt.order_by(PropertyTaxRecord.tax_year.desc())
@@ -362,10 +365,11 @@ def create_tax_record(
     body: PropertyTaxRecordCreate,
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
-    _validate_asset_id(body.asset_id, session, current_user)
+    _validate_asset_id(body.asset_id, session, ctx)
 
-    record = PropertyTaxRecord(user_id=current_user.id, **body.model_dump())
+    record = PropertyTaxRecord(org_id=ctx.org_id, user_id=current_user.id, **body.model_dump())
     session.add(record)
     session.commit()
     session.refresh(record)
@@ -377,16 +381,16 @@ def update_tax_record(
     record_id: int,
     body: PropertyTaxRecordUpdate,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     record = session.get(PropertyTaxRecord, record_id)
     if not record:
         raise HTTPException(404, f"Tax record {record_id} not found")
-    _assert_owner(record, current_user)
+    _assert_owner(record, ctx)
 
     updates = body.model_dump(exclude_unset=True)
     if "asset_id" in updates:
-        _validate_asset_id(updates["asset_id"], session, current_user)
+        _validate_asset_id(updates["asset_id"], session, ctx)
 
     for field, val in updates.items():
         setattr(record, field, val)
@@ -402,12 +406,12 @@ def update_tax_record(
 def delete_tax_record(
     record_id: int,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     record = session.get(PropertyTaxRecord, record_id)
     if not record:
         raise HTTPException(404, f"Tax record {record_id} not found")
-    _assert_owner(record, current_user)
+    _assert_owner(record, ctx)
 
     session.delete(record)
     session.commit()
@@ -419,12 +423,12 @@ async def upload_tax_record_document(
     record_id: int,
     file: UploadFile = File(...),
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     record = session.get(PropertyTaxRecord, record_id)
     if not record:
         raise HTTPException(404, f"Tax record {record_id} not found")
-    _assert_owner(record, current_user)
+    _assert_owner(record, ctx)
 
     url, filename = await _save_document("tax_records", record_id, file)
     record.document_url = url

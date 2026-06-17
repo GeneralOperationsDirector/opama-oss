@@ -19,6 +19,7 @@ from sqlmodel import Session, select
 from services.shared.database import get_session
 from services.shared.models import User
 from services.auth.middleware import get_current_user
+from services.auth.org_context import OrgContext, get_current_org
 from services.custom_assets.models import CustomAsset
 from .models import Appraisal, InsurancePolicy, PolicyItem
 from .schemas import (
@@ -46,28 +47,28 @@ _MAX_DOC_BYTES = 10 * 1024 * 1024  # 10 MB
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _assert_owner(row, current_user: User) -> None:
-    if row.user_id != current_user.id:
-        raise HTTPException(403, "Cannot access another user's record")
+def _assert_owner(row, ctx: OrgContext) -> None:
+    if row.org_id != ctx.org_id:
+        raise HTTPException(403, "Cannot access another organization's record")
 
 
-def _validate_asset_id(asset_id: Optional[int], session: Session, current_user: User) -> None:
+def _validate_asset_id(asset_id: Optional[int], session: Session, ctx: OrgContext) -> None:
     if asset_id is None:
         return
     asset = session.get(CustomAsset, asset_id)
     if not asset:
         raise HTTPException(404, f"Asset {asset_id} not found")
-    if asset.user_id != current_user.id:
-        raise HTTPException(403, "Cannot link another user's asset")
+    if asset.org_id != ctx.org_id:
+        raise HTTPException(403, "Cannot link another organization's asset")
 
 
-def _validate_appraisal_id(appraisal_id: Optional[int], session: Session, current_user: User) -> None:
+def _validate_appraisal_id(appraisal_id: Optional[int], session: Session, ctx: OrgContext) -> None:
     if appraisal_id is None:
         return
     appraisal = session.get(Appraisal, appraisal_id)
     if not appraisal:
         raise HTTPException(404, f"Appraisal {appraisal_id} not found")
-    _assert_owner(appraisal, current_user)
+    _assert_owner(appraisal, ctx)
 
 
 def _policy_out(policy: InsurancePolicy) -> InsurancePolicyOut:
@@ -111,16 +112,16 @@ def _cleanup_document(subdir: str, record_id: int) -> None:
 @router.get("/summary", response_model=InsuranceSummary)
 def insurance_summary(
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     policies = session.exec(
-        select(InsurancePolicy).where(InsurancePolicy.user_id == current_user.id)
+        select(InsurancePolicy).where(InsurancePolicy.org_id == ctx.org_id)
     ).all()
     appraisals = session.exec(
-        select(Appraisal).where(Appraisal.user_id == current_user.id)
+        select(Appraisal).where(Appraisal.org_id == ctx.org_id)
     ).all()
     items = session.exec(
-        select(PolicyItem).where(PolicyItem.user_id == current_user.id)
+        select(PolicyItem).where(PolicyItem.org_id == ctx.org_id)
     ).all()
 
     today = date.today().isoformat()
@@ -143,11 +144,11 @@ def insurance_summary(
 @router.get("/policies", response_model=list[InsurancePolicyOut])
 def list_policies(
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     policies = session.exec(
         select(InsurancePolicy)
-        .where(InsurancePolicy.user_id == current_user.id)
+        .where(InsurancePolicy.org_id == ctx.org_id)
         .order_by(InsurancePolicy.created_at.desc())
     ).all()
     return [_policy_out(p) for p in policies]
@@ -158,8 +159,11 @@ def create_policy(
     body: InsurancePolicyCreate,
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
-    policy = InsurancePolicy(user_id=current_user.id, **body.model_dump())
+    policy = InsurancePolicy(
+        org_id=ctx.org_id, user_id=current_user.id, **body.model_dump()
+    )
     session.add(policy)
     session.commit()
     session.refresh(policy)
@@ -170,12 +174,12 @@ def create_policy(
 def get_policy(
     policy_id: int,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     policy = session.get(InsurancePolicy, policy_id)
     if not policy:
         raise HTTPException(404, f"Policy {policy_id} not found")
-    _assert_owner(policy, current_user)
+    _assert_owner(policy, ctx)
 
     items = session.exec(
         select(PolicyItem).where(PolicyItem.policy_id == policy_id)
@@ -188,12 +192,12 @@ def update_policy(
     policy_id: int,
     body: InsurancePolicyUpdate,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     policy = session.get(InsurancePolicy, policy_id)
     if not policy:
         raise HTTPException(404, f"Policy {policy_id} not found")
-    _assert_owner(policy, current_user)
+    _assert_owner(policy, ctx)
 
     for field, val in body.model_dump(exclude_unset=True).items():
         setattr(policy, field, val)
@@ -209,12 +213,12 @@ def update_policy(
 def delete_policy(
     policy_id: int,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     policy = session.get(InsurancePolicy, policy_id)
     if not policy:
         raise HTTPException(404, f"Policy {policy_id} not found")
-    _assert_owner(policy, current_user)
+    _assert_owner(policy, ctx)
 
     items = session.exec(
         select(PolicyItem).where(PolicyItem.policy_id == policy_id)
@@ -232,12 +236,12 @@ async def upload_policy_document(
     policy_id: int,
     file: UploadFile = File(...),
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     policy = session.get(InsurancePolicy, policy_id)
     if not policy:
         raise HTTPException(404, f"Policy {policy_id} not found")
-    _assert_owner(policy, current_user)
+    _assert_owner(policy, ctx)
 
     url, filename = await _save_document("policies", policy_id, file)
     policy.document_url = url
@@ -258,16 +262,19 @@ def add_policy_item(
     body: PolicyItemIn,
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     policy = session.get(InsurancePolicy, policy_id)
     if not policy:
         raise HTTPException(404, f"Policy {policy_id} not found")
-    _assert_owner(policy, current_user)
+    _assert_owner(policy, ctx)
 
-    _validate_asset_id(body.asset_id, session, current_user)
-    _validate_appraisal_id(body.appraisal_id, session, current_user)
+    _validate_asset_id(body.asset_id, session, ctx)
+    _validate_appraisal_id(body.appraisal_id, session, ctx)
 
-    item = PolicyItem(policy_id=policy_id, user_id=current_user.id, **body.model_dump())
+    item = PolicyItem(
+        policy_id=policy_id, org_id=ctx.org_id, user_id=current_user.id, **body.model_dump()
+    )
     session.add(item)
     session.commit()
     session.refresh(item)
@@ -280,18 +287,18 @@ def update_policy_item(
     item_id: int,
     body: PolicyItemUpdate,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     item = session.get(PolicyItem, item_id)
     if not item or item.policy_id != policy_id:
         raise HTTPException(404, f"Item {item_id} not found on policy {policy_id}")
-    _assert_owner(item, current_user)
+    _assert_owner(item, ctx)
 
     updates = body.model_dump(exclude_unset=True)
     if "asset_id" in updates:
-        _validate_asset_id(updates["asset_id"], session, current_user)
+        _validate_asset_id(updates["asset_id"], session, ctx)
     if "appraisal_id" in updates:
-        _validate_appraisal_id(updates["appraisal_id"], session, current_user)
+        _validate_appraisal_id(updates["appraisal_id"], session, ctx)
 
     for field, val in updates.items():
         setattr(item, field, val)
@@ -307,12 +314,12 @@ def delete_policy_item(
     policy_id: int,
     item_id: int,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     item = session.get(PolicyItem, item_id)
     if not item or item.policy_id != policy_id:
         raise HTTPException(404, f"Item {item_id} not found on policy {policy_id}")
-    _assert_owner(item, current_user)
+    _assert_owner(item, ctx)
 
     session.delete(item)
     session.commit()
@@ -326,9 +333,9 @@ def delete_policy_item(
 def list_appraisals(
     asset_id: Optional[int] = Query(None),
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
-    stmt = select(Appraisal).where(Appraisal.user_id == current_user.id)
+    stmt = select(Appraisal).where(Appraisal.org_id == ctx.org_id)
     if asset_id is not None:
         stmt = stmt.where(Appraisal.asset_id == asset_id)
     stmt = stmt.order_by(Appraisal.created_at.desc())
@@ -341,10 +348,11 @@ def create_appraisal(
     body: AppraisalCreate,
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
-    _validate_asset_id(body.asset_id, session, current_user)
+    _validate_asset_id(body.asset_id, session, ctx)
 
-    appraisal = Appraisal(user_id=current_user.id, **body.model_dump())
+    appraisal = Appraisal(org_id=ctx.org_id, user_id=current_user.id, **body.model_dump())
     session.add(appraisal)
     session.commit()
     session.refresh(appraisal)
@@ -356,16 +364,16 @@ def update_appraisal(
     appraisal_id: int,
     body: AppraisalUpdate,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     appraisal = session.get(Appraisal, appraisal_id)
     if not appraisal:
         raise HTTPException(404, f"Appraisal {appraisal_id} not found")
-    _assert_owner(appraisal, current_user)
+    _assert_owner(appraisal, ctx)
 
     updates = body.model_dump(exclude_unset=True)
     if "asset_id" in updates:
-        _validate_asset_id(updates["asset_id"], session, current_user)
+        _validate_asset_id(updates["asset_id"], session, ctx)
 
     for field, val in updates.items():
         setattr(appraisal, field, val)
@@ -381,12 +389,12 @@ def update_appraisal(
 def delete_appraisal(
     appraisal_id: int,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     appraisal = session.get(Appraisal, appraisal_id)
     if not appraisal:
         raise HTTPException(404, f"Appraisal {appraisal_id} not found")
-    _assert_owner(appraisal, current_user)
+    _assert_owner(appraisal, ctx)
 
     # Detach any PolicyItems that reference this appraisal as supporting evidence
     items = session.exec(
@@ -407,12 +415,12 @@ async def upload_appraisal_document(
     appraisal_id: int,
     file: UploadFile = File(...),
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     appraisal = session.get(Appraisal, appraisal_id)
     if not appraisal:
         raise HTTPException(404, f"Appraisal {appraisal_id} not found")
-    _assert_owner(appraisal, current_user)
+    _assert_owner(appraisal, ctx)
 
     url, filename = await _save_document("appraisals", appraisal_id, file)
     appraisal.document_url = url

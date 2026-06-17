@@ -9,6 +9,7 @@ import React, { useEffect, useState } from "react";
 import { Plus, Pencil, Trash2, X, Check, Paperclip, ExternalLink } from "lucide-react";
 import { api, API_BASE } from "../../lib/api";
 import { getAuthToken } from "../../lib/authToken";
+import { orgHeader } from "../../lib/activeOrg";
 import type { CustomAsset } from "../custom-assets/types";
 import type { MortgageLoan, MortgageLoanForm } from "./types";
 
@@ -228,7 +229,7 @@ export default function MortgagesTab({ assets, onToast, onSummaryChange }: Props
       fd.append("file", file);
       const res = await fetch(`${API_BASE}/real-estate/mortgages/${id}/document`, {
         method: "POST",
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...orgHeader() },
         body: fd,
       });
       if (!res.ok) throw new Error(`${res.status}`);

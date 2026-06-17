@@ -120,6 +120,8 @@ class SaleTransaction(SQLModel, table=True):
     """
 
     id: Optional[int] = Field(default=None, primary_key=True)
+    # Ownership/RLS scope (pool tenancy — see pool_vs_silo); nullable through backfill.
+    org_id: int = Field(foreign_key="organization.id", index=True)
     user_id: int = Field(foreign_key="user.id", index=True)
     # Soft references: `card`/`inventoryitem` live in the optional
     # opama_pokemon_tcg external plugin and may not exist in this
@@ -193,6 +195,8 @@ class PortfolioSnapshot(SQLModel, table=True):
     """
 
     id: Optional[int] = Field(default=None, primary_key=True)
+    # Ownership/RLS scope (pool tenancy — see pool_vs_silo); nullable through backfill.
+    org_id: int = Field(foreign_key="organization.id", index=True)
     user_id: int = Field(foreign_key="user.id", index=True)
     snapshot_date: date = Field(default_factory=date.today, index=True)
     snapshot_type: str = Field(default="manual")  # manual, auto_daily, auto_weekly
@@ -241,6 +245,10 @@ class UserPortfolioSettings(SQLModel, table=True):
     """
 
     user_id: int = Field(primary_key=True, foreign_key="user.id")
+    # Ownership/RLS scope (pool tenancy — see pool_vs_silo). Settings stay keyed by
+    # user (one row per user); org_id denormalizes the owning org for RLS. Nullable
+    # through backfill.
+    org_id: int = Field(foreign_key="organization.id", index=True)
 
     default_currency: str = Field(default="USD")
     auto_snapshot_enabled: bool = Field(default=True)

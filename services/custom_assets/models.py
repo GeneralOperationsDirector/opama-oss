@@ -9,6 +9,10 @@ class CustomAsset(SQLModel, table=True):
     dedicated module (guitars, wine, watches, sneakers, etc.).
     """
     id: Optional[int] = Field(default=None, primary_key=True)
+    # Ownership/RLS scope (pool tenancy — see pool_vs_silo design). org_id is the
+    # owning Organization; user_id is retained as the creating/acting user (audit).
+    # Nullable through the backfill migration; becomes the canonical scope key.
+    org_id: int = Field(foreign_key="organization.id", index=True)
     user_id: int = Field(index=True)
 
     name: str

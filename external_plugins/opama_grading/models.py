@@ -9,6 +9,8 @@ class CardGradeResult(SQLModel, table=True):
     Optionally linked to an inventory item or custom asset.
     """
     id: Optional[int] = Field(default=None, primary_key=True)
+    # Ownership/RLS scope (pool tenancy — see pool_vs_silo); nullable through backfill.
+    org_id: int = Field(foreign_key="organization.id", index=True)
     user_id: int = Field(index=True)
 
     # Optional links to existing records. card_id/inventory_item_id are soft
@@ -115,6 +117,7 @@ class GradeFeedback(SQLModel, table=True):
     Rows accumulate over time to reveal systematic bias in the analyzer.
     """
     id: Optional[int] = Field(default=None, primary_key=True)
+    org_id: int = Field(foreign_key="organization.id", index=True)
     grade_result_id: int = Field(foreign_key="cardgraderesult.id", index=True)
     user_id: int = Field(index=True)
 

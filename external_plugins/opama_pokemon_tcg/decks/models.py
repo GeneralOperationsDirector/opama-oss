@@ -27,6 +27,9 @@ class Deck(SQLModel, table=True):
     """
 
     id: int = Field(default=None, primary_key=True)
+    # Ownership/RLS scope (pool tenancy — see pool_vs_silo). user_id kept as the
+    # acting/created-by user; nullable through the backfill migration.
+    org_id: int = Field(foreign_key="organization.id", index=True)
     user_id: int = Field(foreign_key="user.id")
     name: str
     format: Optional[str] = None

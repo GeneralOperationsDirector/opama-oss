@@ -5,9 +5,10 @@ Endpoints:
 - GET /auth/config - Public: which auth provider is active ("local" | "firebase")
 - POST /auth/register - Create a local username/password account (AUTH_PROVIDER=local only)
 - POST /auth/login - Authenticate a local account, issue a long-lived token (AUTH_PROVIDER=local only)
-- GET /auth/me - Get current user profile
+- GET /auth/me - Get current user profile (+ active org from X-Org-Id, org list)
 - PATCH /auth/me - Update current user profile
 - DELETE /auth/me - Delete current user account
+- GET /auth/orgs - List the orgs the caller can act in (org-switcher source)
 """
 
 import os
@@ -18,8 +19,14 @@ from pydantic import BaseModel
 
 from services.shared.audit import write_audit_log
 from services.shared.database import get_session
-from services.shared.models import User
+from services.shared.models import Organization, User
 from .middleware import get_current_user
+from .org_context import (
+    OrgContext,
+    get_current_org,
+    list_user_orgs,
+    resolve_org_context,
+)
 from .providers import provider_name
 from .providers.local_provider import LocalProvider, credential_for, issue_token
 
@@ -28,8 +35,30 @@ router = APIRouter()
 _local_provider = LocalProvider()
 
 
+class OrgSummary(BaseModel):
+    """One organization the caller belongs to, with their role in it.
+
+    Drives the frontend org switcher and tells it which org is active for the
+    current request (the pool tenancy scope — see the pool_vs_silo design memory).
+    """
+
+    id: int
+    name: str
+    slug: str
+    role: str
+    is_personal: bool
+    plan_tier: str
+    plan_status: str
+
+
 class UserProfileResponse(BaseModel):
-    """User profile response model."""
+    """User profile response model.
+
+    `active_org` is the organization this request resolved to (honoring the
+    optional `X-Org-Id` header); `organizations` is every org the user can act in.
+    Both are populated wherever org context is available; older clients that ignore
+    them keep working.
+    """
 
     id: int
     firebase_uid: Optional[str]
@@ -39,6 +68,8 @@ class UserProfileResponse(BaseModel):
     is_admin: bool
     created_at: str
     has_password: bool
+    active_org: Optional[OrgSummary] = None
+    organizations: list[OrgSummary] = []
 
 
 class UpdateProfileRequest(BaseModel):
@@ -107,11 +138,36 @@ def _instance_exposed() -> bool:
     return any(not _is_local_origin(o) for o in origins)
 
 
-def _profile(user: User, session: Session) -> UserProfileResponse:
+def _org_summary(org: Organization, role: str) -> OrgSummary:
+    return OrgSummary(
+        id=org.id,
+        name=org.name,
+        slug=org.slug,
+        role=role,
+        is_personal=org.is_personal,
+        plan_tier=org.plan_tier,
+        plan_status=org.plan_status,
+    )
+
+
+def _profile(
+    user: User,
+    session: Session,
+    ctx: Optional[OrgContext] = None,
+) -> UserProfileResponse:
     has_password = True
     if user.auth_provider == "local":
         credential = credential_for(user, session)
         has_password = bool(credential and credential.password_hash)
+
+    # Resolve org context when the caller didn't supply one, so every profile
+    # response carries the active org + membership list (and lazily heals a user
+    # with no org into an org-of-one). Honors X-Org-Id only when ctx is passed in
+    # (i.e. from get_current_org); the fallback always resolves the default org.
+    if ctx is None:
+        ctx = resolve_org_context(user, session)
+
+    organizations = [_org_summary(o, role) for o, role in list_user_orgs(user, session)]
 
     return UserProfileResponse(
         id=user.id,
@@ -122,6 +178,8 @@ def _profile(user: User, session: Session) -> UserProfileResponse:
         is_admin=user.is_admin,
         created_at=user.created_at.isoformat(),
         has_password=has_password,
+        active_org=_org_summary(ctx.org, ctx.role),
+        organizations=organizations,
     )
 
 
@@ -220,15 +278,31 @@ async def set_local_password(
 @router.get("/me", response_model=UserProfileResponse)
 async def get_current_user_profile(
     current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
     session: Session = Depends(get_session),
 ):
     """
-    Get the current authenticated user's profile.
+    Get the current authenticated user's profile, including the active org
+    (resolved from the optional `X-Org-Id` header) and the user's full org list.
 
     Returns:
         UserProfileResponse: User profile data
     """
-    return _profile(current_user, session)
+    return _profile(current_user, session, ctx=ctx)
+
+
+@router.get("/orgs", response_model=list[OrgSummary])
+async def list_my_orgs(
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    """Every organization the caller can act in, with their role in each.
+
+    The org switcher reads this; to switch, the client sends the chosen org's id
+    as the `X-Org-Id` header on subsequent requests (resolution is per-request, so
+    there is no server-side "current org" to POST). Personal org sorts first.
+    """
+    return [_org_summary(o, role) for o, role in list_user_orgs(current_user, session)]
 
 
 @router.patch("/me", response_model=UserProfileResponse)

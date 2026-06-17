@@ -1,6 +1,6 @@
 """
 System info endpoint — used by the in-app status panel.
-Returns non-sensitive operational stats for the current user's data.
+Returns non-sensitive operational stats for the current organization's data.
 """
 import platform
 from datetime import datetime, timezone
@@ -14,6 +14,7 @@ from services.shared.database import get_session
 from services.shared.models import User
 from services.shared.models_security import AuditLog
 from services.auth.middleware import get_current_user, require_admin
+from services.auth.org_context import OrgContext, get_current_org
 from services.custom_assets.models import CustomAsset
 
 # Pokémon TCG and Card Grader are optional external plugins
@@ -47,7 +48,7 @@ def _dir_size_mb(path: Path) -> float:
 @router.get("/info")
 def system_info(
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     uptime_s = int((datetime.now(timezone.utc) - _START_TIME).total_seconds())
     hours, rem = divmod(uptime_s, 3600)
@@ -57,26 +58,26 @@ def system_info(
     if InventoryItem is not None:
         inventory_count = session.exec(
             select(func.count()).select_from(InventoryItem)
-            .where(InventoryItem.user_id == current_user.id)
+            .where(InventoryItem.org_id == ctx.org_id)
         ).one()
 
     deck_count = 0
     if Deck is not None:
         deck_count = session.exec(
             select(func.count()).select_from(Deck)
-            .where(Deck.user_id == current_user.id)
+            .where(Deck.org_id == ctx.org_id)
         ).one()
 
     asset_count = session.exec(
         select(func.count()).select_from(CustomAsset)
-        .where(CustomAsset.user_id == current_user.id)
+        .where(CustomAsset.org_id == ctx.org_id)
     ).one()
 
     grading_count = 0
     if CardGradeResult is not None:
         grading_count = session.exec(
             select(func.count()).select_from(CardGradeResult)
-            .where(CardGradeResult.user_id == current_user.id)
+            .where(CardGradeResult.org_id == ctx.org_id)
         ).one()
 
     return {

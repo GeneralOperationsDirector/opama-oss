@@ -18,6 +18,7 @@ from sqlmodel import Session, or_, select
 from services.shared.database import get_session
 from services.shared.models import User
 from services.auth.middleware import get_current_user
+from services.auth.org_context import OrgContext, get_current_org
 from services.custom_assets.models import CustomAsset
 from .models import ServiceRecord, VehicleDocument
 from .schemas import (
@@ -41,17 +42,17 @@ _MAX_DOC_BYTES = 10 * 1024 * 1024  # 10 MB
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _assert_owner(row, current_user: User) -> None:
-    if row.user_id != current_user.id:
-        raise HTTPException(403, "Cannot access another user's record")
+def _assert_owner(row, ctx: OrgContext) -> None:
+    if row.org_id != ctx.org_id:
+        raise HTTPException(403, "Cannot access another organization's record")
 
 
-def _validate_asset_id(asset_id: int, session: Session, current_user: User) -> None:
+def _validate_asset_id(asset_id: int, session: Session, ctx: OrgContext) -> None:
     asset = session.get(CustomAsset, asset_id)
     if not asset:
         raise HTTPException(404, f"Asset {asset_id} not found")
-    if asset.user_id != current_user.id:
-        raise HTTPException(403, "Cannot link another user's asset")
+    if asset.org_id != ctx.org_id:
+        raise HTTPException(403, "Cannot link another organization's asset")
 
 
 def _record_out(record: ServiceRecord) -> ServiceRecordOut:
@@ -91,20 +92,20 @@ def _cleanup_document(subdir: str, record_id: int) -> None:
 @router.get("/summary", response_model=VehicleSummary)
 def vehicle_summary(
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     vehicle_count = len(session.exec(
         select(CustomAsset)
-        .where(CustomAsset.user_id == current_user.id)
+        .where(CustomAsset.org_id == ctx.org_id)
         .where(or_(CustomAsset.category.ilike("vehicle"), CustomAsset.category.ilike("bicycle")))
     ).all())
 
     records = session.exec(
-        select(ServiceRecord).where(ServiceRecord.user_id == current_user.id)
+        select(ServiceRecord).where(ServiceRecord.org_id == ctx.org_id)
     ).all()
 
     documents = session.exec(
-        select(VehicleDocument).where(VehicleDocument.user_id == current_user.id)
+        select(VehicleDocument).where(VehicleDocument.org_id == ctx.org_id)
     ).all()
 
     today = date.today().isoformat()
@@ -127,9 +128,9 @@ def vehicle_summary(
 def list_service_records(
     asset_id: Optional[int] = Query(None),
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
-    stmt = select(ServiceRecord).where(ServiceRecord.user_id == current_user.id)
+    stmt = select(ServiceRecord).where(ServiceRecord.org_id == ctx.org_id)
     if asset_id is not None:
         stmt = stmt.where(ServiceRecord.asset_id == asset_id)
     stmt = stmt.order_by(ServiceRecord.created_at.desc())
@@ -142,10 +143,11 @@ def create_service_record(
     body: ServiceRecordCreate,
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
-    _validate_asset_id(body.asset_id, session, current_user)
+    _validate_asset_id(body.asset_id, session, ctx)
 
-    record = ServiceRecord(user_id=current_user.id, **body.model_dump())
+    record = ServiceRecord(org_id=ctx.org_id, user_id=current_user.id, **body.model_dump())
     session.add(record)
     session.commit()
     session.refresh(record)
@@ -157,16 +159,16 @@ def update_service_record(
     record_id: int,
     body: ServiceRecordUpdate,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     record = session.get(ServiceRecord, record_id)
     if not record:
         raise HTTPException(404, f"Service record {record_id} not found")
-    _assert_owner(record, current_user)
+    _assert_owner(record, ctx)
 
     updates = body.model_dump(exclude_unset=True)
     if "asset_id" in updates:
-        _validate_asset_id(updates["asset_id"], session, current_user)
+        _validate_asset_id(updates["asset_id"], session, ctx)
 
     for field, val in updates.items():
         setattr(record, field, val)
@@ -182,12 +184,12 @@ def update_service_record(
 def delete_service_record(
     record_id: int,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     record = session.get(ServiceRecord, record_id)
     if not record:
         raise HTTPException(404, f"Service record {record_id} not found")
-    _assert_owner(record, current_user)
+    _assert_owner(record, ctx)
 
     session.delete(record)
     session.commit()
@@ -199,12 +201,12 @@ async def upload_service_record_document(
     record_id: int,
     file: UploadFile = File(...),
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     record = session.get(ServiceRecord, record_id)
     if not record:
         raise HTTPException(404, f"Service record {record_id} not found")
-    _assert_owner(record, current_user)
+    _assert_owner(record, ctx)
 
     url, filename = await _save_document("service_records", record_id, file)
     record.document_url = url
@@ -223,9 +225,9 @@ async def upload_service_record_document(
 def list_vehicle_documents(
     asset_id: Optional[int] = Query(None),
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
-    stmt = select(VehicleDocument).where(VehicleDocument.user_id == current_user.id)
+    stmt = select(VehicleDocument).where(VehicleDocument.org_id == ctx.org_id)
     if asset_id is not None:
         stmt = stmt.where(VehicleDocument.asset_id == asset_id)
     stmt = stmt.order_by(VehicleDocument.created_at.desc())
@@ -238,10 +240,11 @@ def create_vehicle_document(
     body: VehicleDocumentCreate,
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
-    _validate_asset_id(body.asset_id, session, current_user)
+    _validate_asset_id(body.asset_id, session, ctx)
 
-    document = VehicleDocument(user_id=current_user.id, **body.model_dump())
+    document = VehicleDocument(org_id=ctx.org_id, user_id=current_user.id, **body.model_dump())
     session.add(document)
     session.commit()
     session.refresh(document)
@@ -253,16 +256,16 @@ def update_vehicle_document(
     document_id: int,
     body: VehicleDocumentUpdate,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     document = session.get(VehicleDocument, document_id)
     if not document:
         raise HTTPException(404, f"Document {document_id} not found")
-    _assert_owner(document, current_user)
+    _assert_owner(document, ctx)
 
     updates = body.model_dump(exclude_unset=True)
     if "asset_id" in updates:
-        _validate_asset_id(updates["asset_id"], session, current_user)
+        _validate_asset_id(updates["asset_id"], session, ctx)
 
     for field, val in updates.items():
         setattr(document, field, val)
@@ -278,12 +281,12 @@ def update_vehicle_document(
 def delete_vehicle_document(
     document_id: int,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     document = session.get(VehicleDocument, document_id)
     if not document:
         raise HTTPException(404, f"Document {document_id} not found")
-    _assert_owner(document, current_user)
+    _assert_owner(document, ctx)
 
     session.delete(document)
     session.commit()
@@ -295,12 +298,12 @@ async def upload_vehicle_document_file(
     document_id: int,
     file: UploadFile = File(...),
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     document = session.get(VehicleDocument, document_id)
     if not document:
         raise HTTPException(404, f"Document {document_id} not found")
-    _assert_owner(document, current_user)
+    _assert_owner(document, ctx)
 
     url, filename = await _save_document("documents", document_id, file)
     document.document_url = url

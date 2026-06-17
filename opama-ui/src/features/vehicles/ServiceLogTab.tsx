@@ -10,6 +10,7 @@ import React, { useEffect, useState } from "react";
 import { Plus, Pencil, Trash2, X, Check, Paperclip, ExternalLink } from "lucide-react";
 import { api, API_BASE } from "../../lib/api";
 import { getAuthToken } from "../../lib/authToken";
+import { orgHeader } from "../../lib/activeOrg";
 import type { AppModule } from "../../types";
 import type { CustomAsset } from "../custom-assets/types";
 import type { ServiceRecord, ServiceRecordForm } from "./types";
@@ -204,7 +205,7 @@ export default function ServiceLogTab({ assets, onToast, onSummaryChange, onNavi
       fd.append("file", file);
       const res = await fetch(`${API_BASE}/vehicles/service-records/${id}/document`, {
         method: "POST",
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...orgHeader() },
         body: fd,
       });
       if (!res.ok) throw new Error(`${res.status}`);

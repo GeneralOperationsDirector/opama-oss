@@ -5,9 +5,12 @@ The core of the whitelabel product: tracking items of any asset class. Owns
 CRUD plus image upload (front/back, with auto-thumbnails), the portfolio
 `/summary`, and the two `X-Export-Key`-authenticated `/website-listings`
 endpoints the external storefront site pulls from and posts sales back to.
-Auth + ownership are enforced on every user-data route via `_assert_owner()`;
-static routes (`/summary`, `/website-listings`) are declared before the
-dynamic `/{asset_id}` route so they aren't shadowed.
+Auth + ownership are enforced on every user-data route via `_assert_org_access()`
+— rows are scoped to the caller's active organization (pool tenancy; see the
+pool_vs_silo design memory), so a store's staff share one catalog while `user_id`
+is retained as the creating/acting user for audit. Static routes (`/summary`,
+`/website-listings`) are declared before the dynamic `/{asset_id}` route so they
+aren't shadowed.
 """
 import io
 import os
@@ -26,6 +29,7 @@ from sqlmodel import Session, select
 from services.shared.database import get_session
 from services.shared.models import User
 from services.auth.middleware import get_current_user
+from services.auth.org_context import OrgContext, get_current_org
 from .models import CustomAsset, CustomAssetField
 from .schemas import (
     CustomAssetCreate,
@@ -99,9 +103,16 @@ def _hydrate(asset: CustomAsset, session: Session) -> CustomAssetOut:
     )
 
 
-def _assert_owner(asset: CustomAsset, current_user: User) -> None:
-    if asset.user_id != current_user.id:
-        raise HTTPException(403, "Cannot access another user's asset")
+def _assert_org_access(asset: CustomAsset, ctx: OrgContext) -> None:
+    """
+    Authorize access by the active organization (pool tenancy — see pool_vs_silo).
+    Any member of the asset's owning org (owner/manager/staff) may act on it;
+    membership in `ctx.org` was already verified by get_current_org. This is what
+    lets a store's staff share one catalog. `user_id` is retained as the
+    creating/acting user for audit, not for access control.
+    """
+    if asset.org_id != ctx.org_id:
+        raise HTTPException(403, "Cannot access another organization's asset")
 
 
 # Also imported by external_plugins/opama_storefront/router.py to normalize
@@ -156,9 +167,9 @@ def list_assets(
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
-    stmt = select(CustomAsset).where(CustomAsset.user_id == current_user.id)
+    stmt = select(CustomAsset).where(CustomAsset.org_id == ctx.org_id)
     if category:
         stmt = stmt.where(CustomAsset.category == category)
     if q:
@@ -171,11 +182,11 @@ def list_assets(
 @router.get("/categories", response_model=list[str])
 def list_categories(
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     rows = session.exec(
         select(CustomAsset.category)
-        .where(CustomAsset.user_id == current_user.id)
+        .where(CustomAsset.org_id == ctx.org_id)
         .distinct()
     ).all()
     return sorted(rows)
@@ -184,10 +195,10 @@ def list_categories(
 @router.get("/summary", response_model=PortfolioSummary)
 def portfolio_summary(
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     assets = session.exec(
-        select(CustomAsset).where(CustomAsset.user_id == current_user.id)
+        select(CustomAsset).where(CustomAsset.org_id == ctx.org_id)
     ).all()
 
     total_cost = sum((a.purchase_price or 0) * a.quantity for a in assets)
@@ -272,12 +283,12 @@ def record_sale(
 def get_asset(
     asset_id: int,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     asset = session.get(CustomAsset, asset_id)
     if not asset:
         raise HTTPException(404, f"Asset {asset_id} not found")
-    _assert_owner(asset, current_user)
+    _assert_org_access(asset, ctx)
     return _hydrate(asset, session)
 
 
@@ -286,9 +297,11 @@ def create_asset(
     body: CustomAssetCreate,
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     asset = CustomAsset(
-        user_id=current_user.id,
+        org_id=ctx.org_id,        # owning organization (tenancy/RLS scope)
+        user_id=current_user.id,  # creating/acting user (audit)
         name=body.name,
         category=body.category,
         condition=body.condition,
@@ -320,12 +333,12 @@ def update_asset(
     asset_id: int,
     body: CustomAssetUpdate,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     asset = session.get(CustomAsset, asset_id)
     if not asset:
         raise HTTPException(404, f"Asset {asset_id} not found")
-    _assert_owner(asset, current_user)
+    _assert_org_access(asset, ctx)
 
     updates = body.model_dump(exclude_unset=True, exclude={"custom_fields"})
     for field, val in updates.items():
@@ -356,12 +369,12 @@ def update_asset(
 def delete_asset(
     asset_id: int,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     asset = session.get(CustomAsset, asset_id)
     if not asset:
         raise HTTPException(404, f"Asset {asset_id} not found")
-    _assert_owner(asset, current_user)
+    _assert_org_access(asset, ctx)
 
     fields = session.exec(
         select(CustomAssetField).where(CustomAssetField.asset_id == asset_id)
@@ -379,13 +392,13 @@ async def upload_asset_image(
     asset_id: int,
     file: UploadFile = File(...),
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     """Upload the front image for an asset. Generates a thumbnail automatically."""
     asset = session.get(CustomAsset, asset_id)
     if not asset:
         raise HTTPException(404, f"Asset {asset_id} not found")
-    _assert_owner(asset, current_user)
+    _assert_org_access(asset, ctx)
 
     ext = _IMAGE_TYPES.get(file.content_type or "")
     if not ext:
@@ -414,13 +427,13 @@ async def upload_asset_back_image(
     asset_id: int,
     file: UploadFile = File(...),
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
 ):
     """Upload the back image for an asset. Generates a thumbnail automatically."""
     asset = session.get(CustomAsset, asset_id)
     if not asset:
         raise HTTPException(404, f"Asset {asset_id} not found")
-    _assert_owner(asset, current_user)
+    _assert_org_access(asset, ctx)
 
     ext = _IMAGE_TYPES.get(file.content_type or "")
     if not ext:

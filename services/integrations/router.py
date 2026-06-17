@@ -38,6 +38,7 @@ import json
 
 from services.shared.database import get_session
 from services.shared.models import User, GenericAsset
+from services.auth.org_context import resolve_org_context
 
 # Pokémon TCG is an optional external plugin (external_plugins/opama_pokemon_tcg/,
 # see PLUGIN_PATHS) — not present in core-only deployments (e.g. oss-test stack).
@@ -76,6 +77,12 @@ def _get_agent_user(session: Session) -> User:
     if not user:
         raise HTTPException(404, f"User {_USER_ID} not found (set OPENCLAW_USER_ID)")
     return user
+
+
+def _agent_org_id(session: Session) -> int:
+    """The OpenClaw agent acts inside its user's active org (pool tenancy) — all
+    reads/writes here scope by org_id, with _USER_ID kept as the audit actor."""
+    return resolve_org_context(_get_agent_user(session), session).org_id
 
 
 # ---------------------------------------------------------------------------
@@ -198,12 +205,12 @@ def list_inventory(
     session: Session = Depends(get_session),
     _: None = Depends(_auth),
 ):
-    """List the agent user's inventory, optionally filtered by card name."""
+    """List the agent org's inventory, optionally filtered by card name."""
     _require_pokemon_tcg()
     stmt = (
         select(InventoryItem, Card)
         .join(Card, InventoryItem.card_id == Card.id)
-        .where(InventoryItem.user_id == _USER_ID)
+        .where(InventoryItem.org_id == _agent_org_id(session))
     )
     if q:
         stmt = stmt.where(Card.name.ilike(f"%{q}%"))
@@ -241,10 +248,11 @@ def add_inventory(
     _: None = Depends(_auth),
 ):
     """
-    Add one or more items to the agent user's inventory.
-    Merges into existing row when (user_id, card_id, condition, grade, flags) match.
+    Add one or more items to the agent org's inventory.
+    Merges into existing row when (org_id, card_id, condition, grade, flags) match.
     """
     _require_pokemon_tcg()
+    org_id = _agent_org_id(session)
     results = []
     for item in payload.items:
         card = session.get(Card, item.card_id)
@@ -254,7 +262,7 @@ def add_inventory(
 
         existing = session.exec(
             select(InventoryItem).where(
-                InventoryItem.user_id == _USER_ID,
+                InventoryItem.org_id == org_id,
                 InventoryItem.card_id == item.card_id,
                 InventoryItem.condition == item.condition,
                 InventoryItem.grade == item.grade,
@@ -280,6 +288,7 @@ def add_inventory(
             })
         else:
             new_item = InventoryItem(
+                org_id=org_id,
                 user_id=_USER_ID,
                 card_id=item.card_id,
                 quantity=max(1, item.quantity),
@@ -320,19 +329,20 @@ def portfolio_summary(
 ):
     """Return a quick inventory count and estimated value summary."""
     _require_pokemon_tcg()
+    org_id = _agent_org_id(session)
     total_items = session.exec(
         select(func.sum(InventoryItem.quantity))
-        .where(InventoryItem.user_id == _USER_ID)
+        .where(InventoryItem.org_id == org_id)
     ).one() or 0
 
     unique_cards = session.exec(
         select(func.count(InventoryItem.id))
-        .where(InventoryItem.user_id == _USER_ID)
+        .where(InventoryItem.org_id == org_id)
     ).one() or 0
 
     total_cost = session.exec(
         select(func.sum(InventoryItem.purchase_price_per_card * InventoryItem.quantity))
-        .where(InventoryItem.user_id == _USER_ID)
+        .where(InventoryItem.org_id == org_id)
         .where(InventoryItem.purchase_price_per_card.isnot(None))
     ).one() or 0.0
 
@@ -735,8 +745,8 @@ def list_assets(
     session: Session = Depends(get_session),
     _: None = Depends(_auth),
 ):
-    """List generic assets for the agent user, optionally filtered."""
-    stmt = select(GenericAsset).where(GenericAsset.user_id == _USER_ID)
+    """List generic assets for the agent org, optionally filtered."""
+    stmt = select(GenericAsset).where(GenericAsset.org_id == _agent_org_id(session))
     if asset_class:
         stmt = stmt.where(GenericAsset.asset_class == asset_class)
     if q:
@@ -771,7 +781,7 @@ def get_asset(
     _: None = Depends(_auth),
 ):
     asset = session.get(GenericAsset, asset_id)
-    if not asset or asset.user_id != _USER_ID:
+    if not asset or asset.org_id != _agent_org_id(session):
         raise HTTPException(404, f"Asset {asset_id} not found")
     return {
         "id": asset.id,
@@ -801,14 +811,15 @@ def add_asset(
     _: None = Depends(_auth),
 ):
     """
-    Add a generic asset. Merges by (user_id, identifier, identifier_type)
+    Add a generic asset. Merges by (org_id, identifier, identifier_type)
     when an identifier is present; otherwise always creates a new row.
     """
+    org_id = _agent_org_id(session)
     existing = None
     if payload.identifier and payload.identifier_type:
         existing = session.exec(
             select(GenericAsset).where(
-                GenericAsset.user_id == _USER_ID,
+                GenericAsset.org_id == org_id,
                 GenericAsset.identifier == payload.identifier,
                 GenericAsset.identifier_type == payload.identifier_type,
             )
@@ -828,6 +839,7 @@ def add_asset(
         return {"id": existing.id, "name": existing.name, "merged": True, "quantity": existing.quantity}
 
     new_asset = GenericAsset(
+        org_id=org_id,
         user_id=_USER_ID,
         asset_class=payload.asset_class,
         name=payload.name,
@@ -855,7 +867,7 @@ def delete_asset(
     _: None = Depends(_auth),
 ):
     asset = session.get(GenericAsset, asset_id)
-    if not asset or asset.user_id != _USER_ID:
+    if not asset or asset.org_id != _agent_org_id(session):
         raise HTTPException(404, f"Asset {asset_id} not found")
     session.delete(asset)
     session.commit()

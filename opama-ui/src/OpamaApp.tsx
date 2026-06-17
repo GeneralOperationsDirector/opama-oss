@@ -47,6 +47,7 @@ import { useLicense } from "./contexts/LicenseContext";
 
 import { API_BASE, api, fetchDecksForUser, addToWishlist, upsertTradeItem } from "./lib/api";
 import { isModuleEnabled, setActiveBackendPlugins } from "./lib/moduleRegistry";
+import { getActiveOrgId, setActiveOrgId } from "./lib/activeOrg";
 import type { AppModule, Deck, DeckWithCards, Tab } from "./types";
 
 // ── Guest prompt — shown in place of any data-bound module when not signed in ─
@@ -204,13 +205,22 @@ export default function OpamaApp() {
   useEffect(() => {
     if (!currentUser) {
       setUserProfile(null);
+      setActiveOrgId(null, false);  // clear active org so it can't leak to a different login
       return;
     }
 
     (async () => {
       try {
-        const profile = await api<{ id: number; firebase_uid: string; email: string }>('/auth/me');
+        const profile = await api<{
+          id: number; firebase_uid: string; email: string;
+          active_org?: { id: number } | null;
+        }>('/auth/me');
         setUserProfile(profile);
+        // Seed the active org from the resolved default if the user hasn't picked
+        // one yet (silent — no reload; just primes the X-Org-Id header + switcher).
+        if (getActiveOrgId() == null && profile.active_org) {
+          setActiveOrgId(profile.active_org.id, false);
+        }
       } catch (err) {
         console.error('Failed to fetch user profile:', err);
         addToast('Failed to load user profile', 'error');
