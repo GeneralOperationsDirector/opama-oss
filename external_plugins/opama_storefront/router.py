@@ -23,7 +23,8 @@ from services.shared.audit import write_audit_log
 from services.shared.database import get_session
 from services.shared.models import User
 from services.auth.middleware import get_current_user
-from services.auth.org_context import OrgContext, get_current_org
+from services.auth.org_context import OrgContext
+from services.auth.entitlements import require_tier
 from services.custom_assets.models import CustomAsset, CustomAssetField
 from services.custom_assets.router import _category_slug
 from services.github_publish.client import get_publish_config, commit_file
@@ -40,6 +41,11 @@ from .schemas import (
 )
 
 router = APIRouter(prefix="/storefront", tags=["storefront"])
+
+# Storefront is a premium-tier plugin (plugin.yaml). Gates org-scoped endpoints
+# on the active org's plan when ENTITLEMENT_MODE=org; pass-through (resolves the
+# active org like get_current_org) in the default "license" mode.
+require_storefront = require_tier("premium", module="storefront")
 
 _PUBLIC_API_URL = os.environ.get("PUBLIC_API_URL", "").rstrip("/")
 
@@ -129,7 +135,7 @@ def _settings_out(s: StorefrontSettings) -> StorefrontSettingsOut:
 @router.get("/settings", response_model=StorefrontSettingsOut)
 def get_settings(
     session: Session = Depends(get_session),
-    ctx: OrgContext = Depends(get_current_org),
+    ctx: OrgContext = Depends(require_storefront),
 ):
     s = _get_settings(ctx.org_id, session)
     if not s:
@@ -143,7 +149,7 @@ def upsert_settings(
     request: Request,
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
-    ctx: OrgContext = Depends(get_current_org),
+    ctx: OrgContext = Depends(require_storefront),
 ):
     s = _get_settings(ctx.org_id, session)
     data = body.model_dump()
@@ -185,7 +191,7 @@ def upsert_settings(
 def test_image_url(
     body: ImageUrlTestRequest,
     session: Session = Depends(get_session),
-    ctx: OrgContext = Depends(get_current_org),
+    ctx: OrgContext = Depends(require_storefront),
 ):
     """Check that `public_api_url` is reachable and serves an item image.
 
@@ -226,7 +232,7 @@ def test_image_url(
 @router.get("/listings")
 def get_listings(
     session: Session = Depends(get_session),
-    ctx: OrgContext = Depends(get_current_org),
+    ctx: OrgContext = Depends(require_storefront),
 ):
     assets = session.exec(
         select(CustomAsset).where(
@@ -250,7 +256,7 @@ def patch_listing(
     asset_id: int,
     body: StorefrontListingPatch,
     session: Session = Depends(get_session),
-    ctx: OrgContext = Depends(get_current_org),
+    ctx: OrgContext = Depends(require_storefront),
 ):
     asset = session.get(CustomAsset, asset_id)
     if not asset:
@@ -271,7 +277,7 @@ def patch_listing(
 @router.get("/sales")
 def get_sales(
     session: Session = Depends(get_session),
-    ctx: OrgContext = Depends(get_current_org),
+    ctx: OrgContext = Depends(require_storefront),
 ):
     sold = session.exec(
         select(CustomAsset).where(
@@ -299,7 +305,7 @@ def get_sales(
 @router.get("/publish/preview")
 def preview_catalog(
     session: Session = Depends(get_session),
-    ctx: OrgContext = Depends(get_current_org),
+    ctx: OrgContext = Depends(require_storefront),
 ):
     s = _get_settings(ctx.org_id, session)
     public_base = s.public_api_url if s else ""
@@ -316,7 +322,7 @@ def publish_catalog(
     request: Request,
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
-    ctx: OrgContext = Depends(get_current_org),
+    ctx: OrgContext = Depends(require_storefront),
 ):
     """Build the catalog and push it to the first configured target that works.
 

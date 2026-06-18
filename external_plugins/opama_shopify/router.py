@@ -20,7 +20,8 @@ from services.shared.audit import write_audit_log
 from services.shared.database import get_session
 from services.shared.models import User
 from services.auth.middleware import get_current_user
-from services.auth.org_context import OrgContext, get_current_org
+from services.auth.org_context import OrgContext
+from services.auth.entitlements import require_tier
 from opama_storefront.models import StorefrontSettings
 from opama_storefront.router import _generate_catalog
 
@@ -31,6 +32,11 @@ from .models import ShopifySettings, ShopifyProductMapping
 from .schemas import ShopifySettingsIn, ShopifySettingsOut, ShopifyPublishResult
 
 router = APIRouter(prefix="/shopify", tags=["shopify"])
+
+# Shopify is a premium-tier plugin (plugin.yaml). Gates org-scoped endpoints on
+# the active org's plan when ENTITLEMENT_MODE=org; pass-through (resolves the
+# active org like get_current_org) in the default "license" mode.
+require_shopify = require_tier("premium", module="shopify")
 
 # Admin API access tokens are scoped to a single *.myshopify.com store —
 # restricting to this suffix keeps ShopifyClient from being pointed at an
@@ -101,7 +107,7 @@ def _build_shopify_product(entry: dict) -> dict:
 @router.get("/settings", response_model=ShopifySettingsOut)
 def get_settings(
     session: Session = Depends(get_session),
-    ctx: OrgContext = Depends(get_current_org),
+    ctx: OrgContext = Depends(require_shopify),
 ):
     s = _get_settings(ctx.org_id, session)
     if not s:
@@ -115,7 +121,7 @@ def upsert_settings(
     request: Request,
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
-    ctx: OrgContext = Depends(get_current_org),
+    ctx: OrgContext = Depends(require_shopify),
 ):
     s = _get_settings(ctx.org_id, session)
     data = body.model_dump()
@@ -161,7 +167,7 @@ def upsert_settings(
 @router.post("/settings/test")
 def test_connection(
     session: Session = Depends(get_session),
-    ctx: OrgContext = Depends(get_current_org),
+    ctx: OrgContext = Depends(require_shopify),
 ):
     """Verify the configured shop_domain/access_token via GET /shop.json."""
     s = _get_settings(ctx.org_id, session)
@@ -180,7 +186,7 @@ def test_connection(
 @router.get("/publish/preview")
 def preview_publish(
     session: Session = Depends(get_session),
-    ctx: OrgContext = Depends(get_current_org),
+    ctx: OrgContext = Depends(require_shopify),
 ):
     """Preview the Shopify product payloads /shopify/publish would send,
     without contacting Shopify. Sold items are skipped — Shopify has no
@@ -199,7 +205,7 @@ def publish_to_shopify(
     request: Request,
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
-    ctx: OrgContext = Depends(get_current_org),
+    ctx: OrgContext = Depends(require_shopify),
 ):
     """Create or update a Shopify product for every active (unsold) listing.
 

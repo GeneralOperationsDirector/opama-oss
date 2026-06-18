@@ -22,7 +22,8 @@ from services.shared.database import get_session
 from services.shared.models import User
 from opama_pokemon_tcg.catalog.models import Card
 from services.auth.middleware import get_current_user
-from services.auth.org_context import OrgContext, get_current_org
+from services.auth.org_context import OrgContext
+from services.auth.entitlements import require_tier
 
 _limiter = Limiter(key_func=get_remote_address)
 from services.custom_assets.models import CustomAsset
@@ -50,6 +51,12 @@ from .schemas import (
 )
 
 router = APIRouter(prefix="/grading", tags=["grading"])
+
+# Grading is a premium-tier plugin (plugin.yaml). In the SaaS pool path
+# (ENTITLEMENT_MODE=org) every org-scoped endpoint is gated on the active org's
+# plan via this dependency; in the default "license" mode it is a pass-through
+# that resolves the active org exactly like get_current_org.
+require_grading = require_tier("premium", module="grading")
 
 _MAX_IMAGE_BYTES = 20 * 1024 * 1024  # 20 MB
 
@@ -179,7 +186,7 @@ async def analyze(
     guide_inner: Optional[str] = Query(None, description="Inner border boundary: 'x,y,w,h' in image pixels"),
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
-    ctx: OrgContext = Depends(get_current_org),
+    ctx: OrgContext = Depends(require_grading),
 ):
     """
     Upload a card scan.  Returns both a grade estimate and card identification.
@@ -347,7 +354,7 @@ def transfer(
     body: TransferIn,
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
-    org: OrgContext = Depends(get_current_org),
+    org: OrgContext = Depends(require_grading),
 ):
     """
     Create a collection item from a grading result.
@@ -514,7 +521,7 @@ def transfer(
 def grade_report_image(
     result_id: int,
     session: Session = Depends(get_session),
-    ctx: OrgContext = Depends(get_current_org),
+    ctx: OrgContext = Depends(require_grading),
 ):
     """
     Return a PNG grading report for the given result.
@@ -574,7 +581,7 @@ def grade_debug_image(
     result_id: int,
     view: str,
     session: Session = Depends(get_session),
-    ctx: OrgContext = Depends(get_current_org),
+    ctx: OrgContext = Depends(require_grading),
 ):
     """
     Return a diagnostic PNG for a single grading dimension.
@@ -623,7 +630,7 @@ def recenter_with_color(
     result_id: int,
     body: RecenterIn,
     session: Session = Depends(get_session),
-    ctx: OrgContext = Depends(get_current_org),
+    ctx: OrgContext = Depends(require_grading),
 ):
     """
     Re-run the centering measurement using a border colour sampled by the user.
@@ -718,7 +725,7 @@ def recenter_with_color(
 @router.get("/provider-stats", response_model=list[ProviderStatsOut])
 def provider_stats(
     session: Session = Depends(get_session),
-    ctx: OrgContext = Depends(get_current_org),
+    ctx: OrgContext = Depends(require_grading),
 ):
     """
     Per-provider identification accuracy, aggregated from all transfers where
@@ -779,7 +786,7 @@ def submit_feedback(
     body: FeedbackIn,
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
-    ctx: OrgContext = Depends(get_current_org),
+    ctx: OrgContext = Depends(require_grading),
 ):
     """
     Attach human feedback to a prior grading result.
@@ -842,7 +849,7 @@ def submit_feedback(
 @router.get("/feedback/stats", response_model=FeedbackStats)
 def feedback_stats(
     session: Session = Depends(get_session),
-    ctx: OrgContext = Depends(get_current_org),
+    ctx: OrgContext = Depends(require_grading),
 ):
     """Aggregate accuracy statistics derived from human feedback."""
     total_analyses = session.exec(
@@ -933,7 +940,7 @@ def grade_history(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     session: Session = Depends(get_session),
-    ctx: OrgContext = Depends(get_current_org),
+    ctx: OrgContext = Depends(require_grading),
 ):
     """Return past grade analyses for the current organization, optionally filtered."""
     stmt = select(CardGradeResult).where(CardGradeResult.org_id == ctx.org_id)
