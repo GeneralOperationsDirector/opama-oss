@@ -26,7 +26,8 @@ from services.shared.models import User
 from services.custom_assets.models import CustomAsset
 from services.showcase.models import Showcase, ShowcaseCard
 from services.auth.middleware import get_current_user, get_optional_user
-from services.auth.org_context import OrgContext, get_current_org
+from services.auth.org_context import OrgContext, get_current_org, resolve_org_context
+from services.shared.rls import stamp_session_org
 
 try:
     from opama_pokemon_tcg.catalog.models import Card
@@ -219,12 +220,22 @@ def get_showcase(
     Get a showcase and its cards. Public showcases are visible to anyone;
     private showcases are only visible to their owner.
     """
+    # Under RLS an anonymous viewer has no org GUC; a public showcase is still
+    # reachable via the showcase_public_read policy. Stamp the viewer's own org
+    # first so an authenticated owner can also load their *private* showcase.
+    if current_user is not None:
+        resolve_org_context(current_user, session)
+
     showcase = session.get(Showcase, showcase_id)
     if not showcase:
         raise HTTPException(404, "Showcase not found")
 
     if not showcase.is_public and (not current_user or current_user.id != showcase.user_id):
         raise HTTPException(403, "This showcase is private")
+
+    # The cards/assets below belong to the showcase's org; stamp it so they
+    # resolve under RLS for any viewer of a public showcase.
+    stamp_session_org(session, showcase.org_id)
 
     # Get all cards in this showcase
     showcase_cards = session.exec(
@@ -529,6 +540,11 @@ def get_public_showcases(
 
     result = []
     for showcase in showcases:
+        # Hydration reads the showcase owner's org-scoped assets; stamp that org
+        # so the reads resolve under RLS (the public Showcase rows themselves came
+        # through the showcase_public_read policy with no GUC).
+        stamp_session_org(session, showcase.org_id)
+
         # Get cards for this showcase
         showcase_cards = session.exec(
             select(ShowcaseCard)
