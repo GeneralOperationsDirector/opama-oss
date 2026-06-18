@@ -10,6 +10,7 @@ import type { AppUser } from "../contexts/AuthContext";
 import { useHealthCheck } from "../lib/useHealthCheck";
 import { getNavModules, type ModuleDescriptor } from "../lib/moduleRegistry";
 import OrgSwitcher from "./OrgSwitcher";
+import PlanBadge from "./PlanBadge";
 
 function StatusDot() {
   const health = useHealthCheck();
@@ -141,6 +142,7 @@ export default function HeaderBar({
         <div className="flex items-center gap-1 flex-shrink-0 ml-1">
           {currentUser ? (
             <>
+              <PlanBadge />
               <OrgSwitcher />
               <span className="hidden lg:block text-xs text-slate-400 max-w-[140px] truncate mr-0.5">
                 {currentUser.email}

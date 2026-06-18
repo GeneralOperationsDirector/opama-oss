@@ -186,6 +186,83 @@ def _stripe_sig(payload: bytes, secret: str, ts: int) -> str:
     return f"t={ts},v1={v1}"
 
 
+# ---------------------------------------------------------------------------
+# Checkout session creation (config + params)
+# ---------------------------------------------------------------------------
+
+def test_price_for_tier_inverts_price_plans(monkeypatch):
+    from services.billing import config
+    monkeypatch.setenv("STRIPE_PRICE_PLANS", "price_a:premium:*;price_b:enterprise:*")
+    assert config.price_for_tier("premium") == "price_a"
+    assert config.price_for_tier("enterprise") == "price_b"
+    assert config.price_for_tier("nope") == ""
+
+
+def test_checkout_enabled_needs_key_and_price(monkeypatch):
+    from services.billing import config
+    monkeypatch.delenv("STRIPE_SECRET_KEY", raising=False)
+    monkeypatch.delenv("STRIPE_PRICE_PLANS", raising=False)
+    assert config.checkout_enabled() is False
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test")
+    monkeypatch.setenv("STRIPE_PRICE_PLANS", "price_a:premium")
+    assert config.checkout_enabled() is True
+
+
+def test_create_checkout_requires_secret(monkeypatch):
+    from services.billing.checkout import create_checkout_session, CheckoutError
+    monkeypatch.delenv("STRIPE_SECRET_KEY", raising=False)
+    with pytest.raises(CheckoutError):
+        create_checkout_session(org_id=1, tier="premium", success_url="s", cancel_url="c")
+
+
+def test_create_checkout_builds_session_with_org_reference(monkeypatch):
+    import types
+    captured = {}
+    fake = types.ModuleType("stripe")
+
+    class _Sess:
+        @staticmethod
+        def create(**kw):
+            captured.update(kw)
+            return types.SimpleNamespace(url="https://checkout.stripe/test")
+
+    fake.checkout = types.SimpleNamespace(Session=_Sess)
+    monkeypatch.setitem(sys.modules, "stripe", fake)
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test")
+    monkeypatch.setenv("STRIPE_PRICE_PLANS", "price_pro:premium:*")
+
+    from services.billing.checkout import create_checkout_session
+    url = create_checkout_session(
+        org_id=7, tier="premium", success_url="s", cancel_url="c",
+        customer_email="e@e.com")
+
+    assert url == "https://checkout.stripe/test"
+    assert captured["client_reference_id"] == "7"
+    assert captured["line_items"][0]["price"] == "price_pro"
+    assert captured["metadata"] == {"org_id": "7", "tier": "premium"}
+    assert captured["subscription_data"]["metadata"] == {"org_id": "7", "tier": "premium"}
+    assert captured["customer_email"] == "e@e.com"
+    assert fake.api_key == "sk_test"
+
+
+def test_create_checkout_reuses_existing_customer(monkeypatch):
+    import types
+    captured = {}
+    fake = types.ModuleType("stripe")
+    fake.checkout = types.SimpleNamespace(
+        Session=types.SimpleNamespace(
+            create=lambda **kw: (captured.update(kw),
+                                 types.SimpleNamespace(url="u"))[1]))
+    monkeypatch.setitem(sys.modules, "stripe", fake)
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test")
+    monkeypatch.setenv("STRIPE_PRICE_PLANS", "price_pro:premium:*")
+    from services.billing.checkout import create_checkout_session
+    create_checkout_session(org_id=7, tier="premium", success_url="s", cancel_url="c",
+                            customer_id="cus_existing", customer_email="e@e.com")
+    assert captured["customer"] == "cus_existing"
+    assert "customer_email" not in captured  # existing customer takes precedence
+
+
 @pytest.mark.skipif(
     __import__("importlib").util.find_spec("stripe") is None,
     reason="stripe SDK not installed",

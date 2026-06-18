@@ -13,12 +13,19 @@ retrying a customer we don't know about.
 from __future__ import annotations
 
 import logging
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel
 from sqlmodel import Session
 
 from services.shared.database import get_session
+from services.shared.models import User, ORG_ROLE_OWNER
+from services.auth.middleware import get_current_user
+from services.auth.org_context import OrgContext, require_org_role
 
+from . import config
+from .checkout import CheckoutError, create_checkout_session
 from .events import plan_from_event
 from .service import apply_plan_update
 from .webhook import WebhookError, construct_event
@@ -26,6 +33,46 @@ from .webhook import WebhookError, construct_event
 log = logging.getLogger("uvicorn.error")
 
 router = APIRouter()
+
+
+@router.get("/config")
+def billing_config():
+    """Public: whether hosted billing/checkout is configured for this instance.
+
+    The frontend uses this to decide whether to show upgrade UI at all, so an
+    OSS/self-host instance (no Stripe keys) never shows a meaningless "Upgrade".
+    """
+    return {"enabled": config.checkout_enabled()}
+
+
+class CheckoutRequest(BaseModel):
+    tier: str = "premium"
+    price_id: Optional[str] = None
+
+
+@router.post("/checkout")
+def create_checkout(
+    body: CheckoutRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(require_org_role(ORG_ROLE_OWNER)),
+):
+    """Create a Stripe Checkout Session for the active org (owner only) and return
+    its redirect URL. Subscribing is an org-level (billing-owner) action."""
+    origin = request.headers.get("origin") or request.headers.get("referer") or ""
+    try:
+        url = create_checkout_session(
+            org_id=ctx.org_id,
+            tier=body.tier,
+            price_id=body.price_id,
+            customer_id=ctx.org.stripe_customer_id,
+            customer_email=current_user.email,
+            success_url=config.checkout_success_url(origin),
+            cancel_url=config.checkout_cancel_url(origin),
+        )
+    except CheckoutError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"url": url}
 
 
 @router.post("/webhook")

@@ -15,6 +15,42 @@ def stripe_webhook_secret() -> str:
     return os.getenv("STRIPE_WEBHOOK_SECRET", "").strip()
 
 
+def stripe_secret_key() -> str:
+    """The ``sk_...`` secret key used to create Checkout Sessions."""
+    return os.getenv("STRIPE_SECRET_KEY", "").strip()
+
+
+def price_for_tier(tier: str) -> str:
+    """Resolve a Stripe price id to sell for ``tier``.
+
+    Inverts STRIPE_PRICE_PLANS (price → (tier, modules)); the first price mapped
+    to the requested tier wins. Empty if none configured.
+    """
+    for price_id, (plan_tier, _modules) in price_plans().items():
+        if plan_tier == tier:
+            return price_id
+    return ""
+
+
+def checkout_enabled() -> bool:
+    """True when a Checkout can actually be created (secret key + a sellable price)."""
+    return bool(stripe_secret_key() and price_plans())
+
+
+def _origin_join(origin: str, path: str) -> str:
+    return f"{origin.rstrip('/')}{path}"
+
+
+def checkout_success_url(origin: str) -> str:
+    """Where Stripe returns after a completed checkout. Configurable; defaults to
+    the caller's app origin so it works without extra setup."""
+    return os.getenv("BILLING_SUCCESS_URL", "").strip() or _origin_join(origin, "/?billing=success")
+
+
+def checkout_cancel_url(origin: str) -> str:
+    return os.getenv("BILLING_CANCEL_URL", "").strip() or _origin_join(origin, "/?billing=cancel")
+
+
 def price_plans() -> dict[str, tuple[str, str]]:
     """Map a Stripe price id → (tier, modules).
 
