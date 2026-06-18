@@ -15,6 +15,13 @@ Full-stack personal asset management platform. Started as a Pokémon TCG collect
 
 **Running:** Docker Compose locally. API at `http://localhost:6000`, UI at `http://localhost:5173`.
 
+**Vocabulary:** [docs/GLOSSARY.md](docs/GLOSSARY.md) is the source of truth for
+project terms — **Opama Core** (the base engine), **Module** (a unit of
+functionality; the one word for service/plugin/feature), **Edition** (a
+domain-specific solution built on Core — *Opama Pokémon Edition* is the
+flagship), **Collection**, **Organization**. Use these terms in docs, UI strings,
+and new code (it's a lexicon, not a rename — existing symbols stay).
+
 **Other docs:** [USERGUIDE.md](USERGUIDE.md) (end-user walkthrough) and
 [docs/MODULE_DEVELOPMENT.md](docs/MODULE_DEVELOPMENT.md) (building a new
 module/plugin — manifest schema, settings/secrets pattern, distribution
