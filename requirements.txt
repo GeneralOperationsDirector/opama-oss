@@ -30,3 +30,6 @@ requests
 firebase-admin
 slowapi
 alembic
+# Pool billing webhook signature verification (services/billing); lazily
+# imported so the app still runs where billing is unused.
+stripe

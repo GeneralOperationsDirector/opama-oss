@@ -48,6 +48,7 @@ from services.shared.models_plugin_data import PluginData  # noqa: F401
 
 # --- Auth (always loaded) -----------------------------------------------
 from services.auth import router as auth_router, init_firebase_admin
+from services.billing.router import router as billing_router
 
 # --- Plugin loader -------------------------------------------------------
 from app.plugin_loader import discover_plugins, resolve_enabled, load_plugin_models, load_plugin_tools, load_plugins, load_dynamic_plugins, record_loaded_ids
@@ -130,6 +131,10 @@ app.add_middleware(GZipMiddleware, minimum_size=1024)
 # --- Routers -------------------------------------------------------------
 # Auth is always registered — every other plugin depends on it.
 app.include_router(auth_router, prefix="/auth", tags=["auth"])
+
+# Pool billing webhook — always mounted, inert until STRIPE_WEBHOOK_SECRET is set.
+# Flips Organization.plan_* columns read by services.auth.entitlements.require_tier.
+app.include_router(billing_router, prefix="/billing", tags=["billing"])
 
 # Plugin routers are registered dynamically based on ENABLED_PLUGINS.
 _static_loaded = list(load_plugins(_enabled_plugins))
