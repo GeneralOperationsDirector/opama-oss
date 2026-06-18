@@ -32,7 +32,8 @@ from services.shared.models import User
 from opama_pokemon_tcg.catalog.models import Card
 from opama_pokemon_tcg.inventory.models import InventoryItem
 from services.auth.middleware import get_current_user
-from services.auth.org_context import OrgContext, get_current_org
+from services.auth.org_context import OrgContext
+from services.auth.entitlements import require_tier
 from .models import (
     MarketPrice,
     SaleTransaction,
@@ -61,6 +62,12 @@ from .valuation import (
 
 router = APIRouter()
 
+# Portfolio is a premium-tier plugin (see plugin.yaml). In the SaaS pool path
+# (ENTITLEMENT_MODE=org) every org-scoped endpoint below is gated on the active
+# org's plan via this dependency; in the default "license" mode it is a
+# pass-through and resolves the active org exactly like get_current_org.
+require_portfolio = require_tier("premium", module="portfolio")
+
 
 # ---------------------------------------------------------------------------
 # Portfolio Valuation Endpoints
@@ -71,7 +78,7 @@ def get_portfolio_value(
     use_purchase_prices: bool = Query(False, description="Use manual purchase prices instead of market"),
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
-    ctx: OrgContext = Depends(get_current_org),
+    ctx: OrgContext = Depends(require_portfolio),
 ):
     """
     Calculate current portfolio value for the active organization.
@@ -129,7 +136,7 @@ def create_snapshot(
     snapshot_type: str = Query("manual", description="Snapshot type: manual, auto_daily, auto_weekly"),
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
-    ctx: OrgContext = Depends(get_current_org),
+    ctx: OrgContext = Depends(require_portfolio),
 ):
     """
     Create a point-in-time snapshot of portfolio value for the active organization.
@@ -156,7 +163,7 @@ def get_history(
     days: int = Query(90, ge=1, le=365, description="Number of days of history"),
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
-    ctx: OrgContext = Depends(get_current_org),
+    ctx: OrgContext = Depends(require_portfolio),
 ):
     """
     Get historical portfolio values for the active organization.
@@ -179,7 +186,7 @@ def get_breakdown(
     top_n: int = Query(10, ge=1, le=50, description="Number of top groups to return"),
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
-    ctx: OrgContext = Depends(get_current_org),
+    ctx: OrgContext = Depends(require_portfolio),
 ):
     """
     Get portfolio breakdown by category (set, rarity, type, or series)
@@ -255,7 +262,7 @@ def record_sale(
     sale: CreateSaleRequest,
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
-    ctx: OrgContext = Depends(get_current_org),
+    ctx: OrgContext = Depends(require_portfolio),
 ):
     """
     Record a card sale and calculate realized gain/loss for the
@@ -347,7 +354,7 @@ def list_sales(
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     session: Session = Depends(get_session),
-    ctx: OrgContext = Depends(get_current_org),
+    ctx: OrgContext = Depends(require_portfolio),
 ):
     """
     List all sales for the active organization, ordered by sale date (newest first).
@@ -388,7 +395,7 @@ def list_sales(
 def delete_sale(
     sale_id: int,
     session: Session = Depends(get_session),
-    ctx: OrgContext = Depends(get_current_org),
+    ctx: OrgContext = Depends(require_portfolio),
 ):
     """
     Delete a sale transaction and restore the inventory quantity.
@@ -431,7 +438,7 @@ def get_realized_gains_summary(
     days: Optional[int] = Query(None, ge=1, le=3650, description="Optional: limit to last N days"),
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
-    ctx: OrgContext = Depends(get_current_org),
+    ctx: OrgContext = Depends(require_portfolio),
 ):
     """
     Get summary of realized gains/losses from sales for the active organization.
