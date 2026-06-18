@@ -3,8 +3,9 @@ Collections (custom assets) API router — mounted at /assets.
 
 The core of the whitelabel product: tracking items of any asset class. Owns
 CRUD plus image upload (front/back, with auto-thumbnails), the portfolio
-`/summary`, and the two `X-Export-Key`-authenticated `/website-listings`
-endpoints the external storefront site pulls from and posts sales back to.
+`/summary`, and the two per-org `X-Export-Key`-authenticated `/website-listings`
+endpoints the external storefront site pulls from and posts sales back to (the
+key resolves to one Organization, so the endpoints are org-scoped under RLS).
 Auth + ownership are enforced on every user-data route via `_assert_org_access()`
 — rows are scoped to the caller's active organization (pool tenancy; see the
 pool_vs_silo design memory), so a store's staff share one catalog while `user_id`
@@ -14,8 +15,8 @@ aren't shadowed.
 """
 import io
 import os
+import secrets
 from datetime import datetime, date
-from hmac import compare_digest
 from pathlib import Path
 from typing import Optional
 
@@ -27,9 +28,10 @@ from pydantic import BaseModel as _BM
 from sqlmodel import Session, select
 
 from services.shared.database import get_session
-from services.shared.models import User
+from services.shared.models import User, Organization, ORG_ROLE_OWNER
 from services.auth.middleware import get_current_user
-from services.auth.org_context import OrgContext, get_current_org
+from services.auth.org_context import OrgContext, get_current_org, require_org_role
+from services.shared.rls import stamp_session_org
 from .models import CustomAsset, CustomAssetField
 from .schemas import (
     CustomAssetCreate,
@@ -80,13 +82,27 @@ def _abs_image_url(url: Optional[str]) -> Optional[str]:
 _export_key_header = APIKeyHeader(name="X-Export-Key", auto_error=False)
 
 
-def _require_export_key(api_key: Optional[str] = Security(_export_key_header)) -> None:
-    expected = os.environ.get("WEBSITE_EXPORT_KEY", "")
-    if not expected:
-        raise HTTPException(503, "Export key not configured on server")
-    # compare_digest prevents timing-based brute-force attacks
-    if not compare_digest(api_key or "", expected):
+def _require_org_export_key(
+    api_key: Optional[str] = Security(_export_key_header),
+    session: Session = Depends(get_session),
+) -> Organization:
+    """Resolve the Organization that owns this per-org export key.
+
+    Under pool tenancy each org has its own ``export_key`` (a high-entropy token);
+    the storefront pull + sale webhook authenticate with it instead of a single
+    global key. Resolving the org and stamping the RLS GUC makes the otherwise
+    cross-org endpoints org-scoped (and the per-org slug lookup unambiguous).
+    """
+    key = (api_key or "").strip()
+    if not key:
+        raise HTTPException(401, "Missing export key")
+    org = session.exec(
+        select(Organization).where(Organization.export_key == key)
+    ).first()
+    if org is None:
         raise HTTPException(401, "Invalid export key")
+    stamp_session_org(session, org.id)
+    return org
 
 
 # ---------------------------------------------------------------------------
@@ -228,11 +244,14 @@ def portfolio_summary(
 @router.get("/website-listings", response_model=list[WebsiteListing])
 def website_listings(
     session: Session = Depends(get_session),
-    _: None = Depends(_require_export_key),
+    org: Organization = Depends(_require_org_export_key),
 ):
-    """Return all assets marked listed_on_website=True in catalog.json format."""
+    """Return this org's listed_on_website=True assets in catalog.json format."""
     assets = session.exec(
-        select(CustomAsset).where(CustomAsset.listed_on_website == True)  # noqa: E712
+        select(CustomAsset).where(
+            CustomAsset.org_id == org.id,
+            CustomAsset.listed_on_website == True,  # noqa: E712
+        )
     ).all()
 
     result = []
@@ -242,6 +261,34 @@ def website_listings(
         ).all()
         result.append(_to_website_listing(asset, fields))
     return result
+
+
+class ExportKeyOut(_BM):
+    export_key: Optional[str]
+
+
+@router.get("/website-listings/export-key", response_model=ExportKeyOut)
+def get_export_key(ctx: OrgContext = Depends(require_org_role(ORG_ROLE_OWNER))):
+    """Return the active org's storefront export key (owner only)."""
+    return ExportKeyOut(export_key=ctx.org.export_key)
+
+
+@router.post("/website-listings/export-key", response_model=ExportKeyOut)
+def rotate_export_key(
+    session: Session = Depends(get_session),
+    ctx: OrgContext = Depends(require_org_role(ORG_ROLE_OWNER)),
+):
+    """Generate (or rotate) the active org's storefront export key (owner only).
+
+    The new key is returned once here for the owner to configure their storefront
+    site / Cloudflare Worker; thereafter only its presence is observable.
+    """
+    org = session.get(Organization, ctx.org_id)
+    org.export_key = secrets.token_urlsafe(32)
+    session.add(org)
+    session.commit()
+    session.refresh(org)
+    return ExportKeyOut(export_key=org.export_key)
 
 
 class SaleRecord(_BM):
@@ -254,14 +301,18 @@ def record_sale(
     website_slug: str,
     body: SaleRecord,
     session: Session = Depends(get_session),
-    _: None = Depends(_require_export_key),
+    org: Organization = Depends(_require_org_export_key),
 ):
     """
     Mark an asset sold and record the sale price.
     Called by the storefront site's Stripe webhook after checkout.session.completed.
+    Scoped to the org that owns the export key, so the slug lookup is unambiguous.
     """
     asset = session.exec(
-        select(CustomAsset).where(CustomAsset.website_slug == website_slug)
+        select(CustomAsset).where(
+            CustomAsset.org_id == org.id,
+            CustomAsset.website_slug == website_slug,
+        )
     ).first()
     if not asset:
         raise HTTPException(404, f"No asset with website_slug '{website_slug}'")

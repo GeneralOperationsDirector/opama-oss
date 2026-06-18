@@ -140,6 +140,10 @@ class Organization(SQLModel, table=True):
     current_period_end: Optional[datetime] = None
     is_personal: bool = Field(default=False)
     created_at: datetime = Field(default_factory=datetime.utcnow)
+    # Per-org key for the storefront export endpoints (GET /assets/website-listings,
+    # POST /assets/website-listings/{slug}/sold). Scopes the storefront pull + sale
+    # webhook to this one org under pool tenancy. Null until the owner generates one.
+    export_key: Optional[str] = Field(default=None, unique=True, index=True)
 
 
 class Membership(SQLModel, table=True):
