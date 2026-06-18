@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Save, ExternalLink, Info, AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Github, KeyRound, Eye, EyeOff, Wifi, Loader2, XCircle } from "lucide-react";
 import { api } from "../../lib/api";
+import ExportKeySection from "./ExportKeySection";
 import type { StorefrontSettings, GitHubPublishSettings, GitHubTestResult, ImageUrlTestResult } from "./types";
 
 interface Props {
@@ -246,6 +247,9 @@ export default function SettingsTab({ settings, onSaved, onToast }: Props) {
           )}
         </Field>
       </Section>
+
+      {/* ── Export key (per-org storefront auth) ──────────────────── */}
+      <ExportKeySection onToast={onToast} />
 
       {/* ── Image URLs ────────────────────────────────────────────── */}
       <Section
