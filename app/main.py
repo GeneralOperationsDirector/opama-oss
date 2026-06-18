@@ -147,11 +147,25 @@ for _loaded in _static_loaded:
 record_loaded_ids(_static_loaded)
 load_plugin_tools([l.manifest for l in _static_loaded])
 
-# --- Static files --------------------------------------------------------
-_default_uploads = Path(__file__).resolve().parents[1] / "uploads"
-_uploads_dir = Path(os.getenv("UPLOADS_PATH", str(_default_uploads)))
-_uploads_dir.mkdir(parents=True, exist_ok=True)
-app.mount("/uploads", StaticFiles(directory=str(_uploads_dir)), name="uploads")
+# --- Media serving -------------------------------------------------------
+# Uploads go through services.shared.storage. Local backend (default) serves
+# them from disk via StaticFiles; a remote backend (S3/R2) instead redirects
+# /uploads/<key> to the object's bucket/CDN URL — so models, API responses and
+# the frontend keep using the same relative /uploads/... paths either way.
+from services.shared.storage import get_storage as _get_storage
+
+_storage = _get_storage()
+if _storage.remote:
+    from fastapi.responses import RedirectResponse
+
+    @app.get("/uploads/{key:path}")
+    def _serve_upload(key: str):
+        return RedirectResponse(_storage.url(key), status_code=307)
+else:
+    _default_uploads = Path(__file__).resolve().parents[1] / "uploads"
+    _uploads_dir = Path(os.getenv("UPLOADS_PATH", str(_default_uploads)))
+    _uploads_dir.mkdir(parents=True, exist_ok=True)
+    app.mount("/uploads", StaticFiles(directory=str(_uploads_dir)), name="uploads")
 
 # Root for downloaded type=local plugin packages (app/plugin_installer.py).
 # Created at boot — same pattern as _uploads_dir — so the first install has

@@ -17,7 +17,6 @@ import io
 import os
 import secrets
 from datetime import datetime, date
-from pathlib import Path
 from typing import Optional
 
 from PIL import Image
@@ -32,6 +31,7 @@ from services.shared.models import User, Organization, ORG_ROLE_OWNER
 from services.auth.middleware import get_current_user
 from services.auth.org_context import OrgContext, get_current_org, require_org_role
 from services.shared.rls import stamp_session_org
+from services.shared.storage import get_storage, Storage, PUBLIC_PREFIX
 from .models import CustomAsset, CustomAssetField
 from .schemas import (
     CustomAssetCreate,
@@ -44,7 +44,7 @@ from .schemas import (
 
 router = APIRouter(prefix="/assets", tags=["custom-assets"])
 
-_ASSET_UPLOADS = Path("/app/uploads/assets")
+_ASSET_KEY_DIR = "assets"  # storage key namespace, e.g. assets/42.jpg
 _PUBLIC_API_URL = os.environ.get("PUBLIC_API_URL", "").rstrip("/")
 _IMAGE_TYPES = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
 _MAX_IMAGE_BYTES = 10 * 1024 * 1024  # 10 MB
@@ -60,10 +60,17 @@ def _make_thumbnail(raw: bytes) -> bytes:
     return buf.getvalue()
 
 
-def _cleanup_asset_images(asset_id: int) -> None:
-    for pattern in (f"{asset_id}.*", f"{asset_id}_thumb.jpg", f"{asset_id}_back.*", f"{asset_id}_back_thumb.jpg"):
-        for f in _ASSET_UPLOADS.glob(pattern):
-            f.unlink(missing_ok=True)
+def _cleanup_asset_images(image_urls: list[Optional[str]]) -> None:
+    """Delete an asset's stored images (front/back + thumbnails) from storage.
+
+    Driven by the URLs persisted on the row (precise + backend-independent),
+    instead of globbing the local dir — works for both local disk and S3/R2.
+    Pass the URLs captured *before* the row is deleted.
+    """
+    storage = get_storage()
+    for url in image_urls:
+        if url and url.startswith(PUBLIC_PREFIX + "/"):
+            storage.delete(Storage.key_from_public_path(url))
 
 
 def _abs_image_url(url: Optional[str]) -> Optional[str]:
@@ -427,6 +434,10 @@ def delete_asset(
         raise HTTPException(404, f"Asset {asset_id} not found")
     _assert_org_access(asset, ctx)
 
+    # Capture image URLs before the row is expired by the delete/commit.
+    image_urls = [asset.image_url, asset.image_thumb_url,
+                  asset.back_image_url, asset.back_image_thumb_url]
+
     fields = session.exec(
         select(CustomAssetField).where(CustomAssetField.asset_id == asset_id)
     ).all()
@@ -435,7 +446,7 @@ def delete_asset(
     session.flush()  # send field deletes before the FK-constrained asset delete
     session.delete(asset)
     session.commit()
-    _cleanup_asset_images(asset_id)
+    _cleanup_asset_images(image_urls)
 
 
 @router.post("/{asset_id}/image")
@@ -459,9 +470,9 @@ async def upload_asset_image(
     if len(raw) > _MAX_IMAGE_BYTES:
         raise HTTPException(413, "Image exceeds 10 MB limit")
 
-    _ASSET_UPLOADS.mkdir(parents=True, exist_ok=True)
-    (_ASSET_UPLOADS / f"{asset_id}{ext}").write_bytes(raw)
-    (_ASSET_UPLOADS / f"{asset_id}_thumb.jpg").write_bytes(_make_thumbnail(raw))
+    storage = get_storage()
+    storage.save(f"{_ASSET_KEY_DIR}/{asset_id}{ext}", raw, file.content_type or "image/jpeg")
+    storage.save(f"{_ASSET_KEY_DIR}/{asset_id}_thumb.jpg", _make_thumbnail(raw), "image/jpeg")
 
     image_url = f"/uploads/assets/{asset_id}{ext}"
     thumb_url = f"/uploads/assets/{asset_id}_thumb.jpg"
@@ -494,9 +505,9 @@ async def upload_asset_back_image(
     if len(raw) > _MAX_IMAGE_BYTES:
         raise HTTPException(413, "Image exceeds 10 MB limit")
 
-    _ASSET_UPLOADS.mkdir(parents=True, exist_ok=True)
-    (_ASSET_UPLOADS / f"{asset_id}_back{ext}").write_bytes(raw)
-    (_ASSET_UPLOADS / f"{asset_id}_back_thumb.jpg").write_bytes(_make_thumbnail(raw))
+    storage = get_storage()
+    storage.save(f"{_ASSET_KEY_DIR}/{asset_id}_back{ext}", raw, file.content_type or "image/jpeg")
+    storage.save(f"{_ASSET_KEY_DIR}/{asset_id}_back_thumb.jpg", _make_thumbnail(raw), "image/jpeg")
 
     back_image_url = f"/uploads/assets/{asset_id}_back{ext}"
     back_thumb_url = f"/uploads/assets/{asset_id}_back_thumb.jpg"

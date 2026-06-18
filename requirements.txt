@@ -33,3 +33,6 @@ alembic
 # Pool billing webhook signature verification (services/billing); lazily
 # imported so the app still runs where billing is unused.
 stripe
+# Object storage for uploads in the hosted pool (services/shared/storage S3/R2
+# backend); lazily imported so local-disk self-host doesn't need it.
+boto3

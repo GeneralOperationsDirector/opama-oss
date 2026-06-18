@@ -9,7 +9,6 @@ feedback, and per-provider identification stats. `/analyze` is rate-limited
 """
 import json
 from datetime import datetime
-from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File
@@ -32,16 +31,25 @@ from .identifier import identify_card, CardIdentification
 from .models import CardGradeResult, GradeFeedback, IdentificationAttempt
 from .report import generate_report
 
-_UPLOADS = Path("/app/uploads/grading")
+from services.shared.storage import get_storage
+
+_SCAN_KEY_DIR = "grading"  # storage key namespace, e.g. grading/7.jpg
 
 
-def _scan_path(result_id: int) -> Path:
-    return _UPLOADS / f"{result_id}.jpg"
+def _scan_key(result_id: int) -> str:
+    return f"{_SCAN_KEY_DIR}/{result_id}.jpg"
 
 
 def _save_scan(result_id: int, image_bytes: bytes) -> None:
-    _UPLOADS.mkdir(parents=True, exist_ok=True)
-    _scan_path(result_id).write_bytes(image_bytes)
+    get_storage().save(_scan_key(result_id), image_bytes, "image/jpeg")
+
+
+def _read_scan(result_id: int) -> "bytes | None":
+    return get_storage().read(_scan_key(result_id))
+
+
+def _scan_exists(result_id: int) -> bool:
+    return get_storage().exists(_scan_key(result_id))
 from .schemas import (
     GradeResultOut, CardIdentificationOut, CenteringOut, CornerOut, SurfaceOut, EdgeOut,
     RecenterIn, RecenterOut,
@@ -435,7 +443,7 @@ def transfer(
         )
 
         # Use the stored scan as the collection item's image
-        scan_url = f"/uploads/grading/{result_id}.jpg" if _scan_path(result_id).exists() else None
+        scan_url = f"/uploads/grading/{result_id}.jpg" if _scan_exists(result_id) else None
 
         asset = CustomAsset(
             org_id=org.org_id,        # owning organization (tenancy scope)
@@ -534,8 +542,7 @@ def grade_report_image(
     if result.org_id != ctx.org_id:
         raise HTTPException(403, "Cannot access another organization's result")
 
-    scan = _scan_path(result_id)
-    scan_bytes = scan.read_bytes() if scan.exists() else None
+    scan_bytes = _read_scan(result_id)
 
     png = generate_report(
         grade=result.estimated_grade,
@@ -603,14 +610,14 @@ def grade_debug_image(
     if result.org_id != ctx.org_id:
         raise HTTPException(403, "Cannot access another organization's result")
 
-    scan = _scan_path(result_id)
-    if not scan.exists():
+    raw = _read_scan(result_id)
+    if raw is None:
         raise HTTPException(404, "Original scan not available for this result")
 
     outer_guide = _parse_xywh(result.guide_outer) if result.guide_outer else None
     inner_guide = _parse_xywh(result.guide_inner) if result.guide_inner else None
     try:
-        debug_images = generate_debug_images(scan.read_bytes(), outer_guide, inner_guide)
+        debug_images = generate_debug_images(raw, outer_guide, inner_guide)
     except ValueError as exc:
         raise HTTPException(422, str(exc))
 
@@ -654,11 +661,10 @@ def recenter_with_color(
     if result.org_id != ctx.org_id:
         raise HTTPException(403, "Cannot access another organization's result")
 
-    scan = _scan_path(result_id)
-    if not scan.exists():
+    raw = _read_scan(result_id)
+    if raw is None:
         raise HTTPException(404, "Original scan not available for this result")
 
-    raw = scan.read_bytes()
     arr = np.frombuffer(raw, np.uint8)
     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
     if img is None:
