@@ -16,17 +16,19 @@ import React, { useCallback, useMemo, useState } from "react";
 import Section from "../../shared/atoms/Section";
 import Button from "../../shared/atoms/Button";
 import Select from "../../shared/atoms/Select";
-import { Layers, Sparkles, Plus, Trash2 } from "lucide-react";
+import { Layers, Sparkles, Plus, Trash2, Upload, Download } from "lucide-react";
 import {
   fetchDecksForUser,
   renameDeck,
   deleteDeck,
   patchDeckCard,
   removeDeckCard, // compat alias provided in lib/api
+  api,
 } from "../../lib/api";
 import type { Deck, DeckWithCards } from "../../types";
 import { useToast } from "../../shared/Toaster";
 import DeckStatus from "./DeckStatus";
+import ImportDeckModal from "./ImportDeckModal";
 
 export default function DecksTab({
   userId,
@@ -56,6 +58,22 @@ export default function DecksTab({
   // Busy flags
   const [deckBusy, setDeckBusy] = useState<"rename" | "delete" | null>(null);
   const [busyByDeckCard, setBusyByDeckCard] = useState<Record<number, boolean>>({}); // dc.id -> busy
+  const [showImport, setShowImport] = useState(false);
+
+  // Export the active deck as PTCGL text → clipboard.
+  const exportDeck = useCallback(async () => {
+    if (!activeDeckId) {
+      toastError("Select a deck first");
+      return;
+    }
+    try {
+      const r = await api<{ text: string; filename: string }>(`/decks/${activeDeckId}/export`);
+      await navigator.clipboard.writeText(r.text);
+      success("Decklist copied to clipboard");
+    } catch (e) {
+      toastError(e instanceof Error ? e.message : String(e));
+    }
+  }, [activeDeckId, success, toastError]);
 
   const hasActive = !!activeDeck && !!activeDeckId;
 
@@ -191,6 +209,14 @@ export default function DecksTab({
           <Sparkles className="w-4 h-4" /> Get Suggestions
         </Button>
 
+        <Button onClick={() => setShowImport(true)}>
+          <Upload className="w-4 h-4" /> Import
+        </Button>
+
+        <Button onClick={exportDeck} disabled={!hasActive}>
+          <Download className="w-4 h-4" /> Export
+        </Button>
+
         <Button
           className="bg-slate-600 hover:bg-slate-700 disabled:opacity-60"
           disabled={!hasActive || deckBusy !== null}
@@ -320,6 +346,17 @@ export default function DecksTab({
             </ul>
           </div>
         </div>
+      )}
+
+      {showImport && (
+        <ImportDeckModal
+          onClose={() => setShowImport(false)}
+          onImported={async (deckId) => {
+            const list = await fetchDecksForUser(userId);
+            setDecks(list);
+            await refreshDeck(deckId);
+          }}
+        />
       )}
     </Section>
   );

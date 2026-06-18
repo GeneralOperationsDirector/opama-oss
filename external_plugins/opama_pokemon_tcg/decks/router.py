@@ -9,21 +9,54 @@ live in the separate `opama_ai` router, not here.
 from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session, select
+from sqlalchemy import func
 
 from services.shared.database import get_session
 from services.shared.models import User
 from opama_pokemon_tcg.decks.models import Deck, DeckCard
 from opama_pokemon_tcg.decks.validation import validate_deck
-from opama_pokemon_tcg.catalog.models import Card
+from opama_pokemon_tcg.decks.decklist import (
+    ParsedCard, ExportLine, parse_decklist, format_decklist,
+)
+from opama_pokemon_tcg.catalog.models import Card, Set
 from services.auth.middleware import get_current_user
 from services.auth.org_context import OrgContext, get_current_org
 
 router = APIRouter()
 
+_CATEGORIES = {"Pokémon", "Trainer", "Energy"}
+
 
 def _assert_deck_access(deck: Deck, ctx: OrgContext) -> None:
     if deck.org_id != ctx.org_id:
         raise HTTPException(403, "Cannot access another organization's deck")
+
+
+def _resolve_card_id(session: Session, pc: ParsedCard) -> Optional[str]:
+    """Resolve a parsed decklist line to a catalog card_id.
+
+    Prefers an exact set-code + number match (via Set.ptcgo_code); falls back to
+    name (preferring the given number among printings). Returns None if no match.
+    """
+    if pc.set_code and pc.number:
+        row = session.exec(
+            select(Card)
+            .join(Set, Card.set_id == Set.id)
+            .where(func.upper(Set.ptcgo_code) == pc.set_code.upper(),
+                   Card.number == pc.number)
+        ).first()
+        if row:
+            return row.id
+    cands = session.exec(
+        select(Card).where(func.lower(Card.name) == pc.name.lower())
+    ).all()
+    if cands:
+        if pc.number:
+            for c in cands:
+                if c.number == pc.number:
+                    return c.id
+        return cands[0].id
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -162,6 +195,94 @@ def validate_deck_endpoint(
         })
         payload["legal"] = payload["legal"] and True  # missing cards are a warning, not an error
     return payload
+
+
+@router.get("/{deck_id}/export")
+def export_decklist(
+    deck_id: int,
+    session: Session = Depends(get_session),
+    ctx: OrgContext = Depends(get_current_org),
+):
+    """Export a deck as PTCG Live decklist text → `{text, filename}`."""
+    deck = session.get(Deck, deck_id)
+    if not deck:
+        raise HTTPException(404, "Deck not found")
+    _assert_deck_access(deck, ctx)
+
+    dcs = session.exec(select(DeckCard).where(DeckCard.deck_id == deck_id)).all()
+    card_ids = list({dc.card_id for dc in dcs})
+    cards = {c.id: c for c in session.exec(select(Card).where(Card.id.in_(card_ids))).all()}
+    set_ids = list({c.set_id for c in cards.values()})
+    sets = {s.id: s for s in session.exec(select(Set).where(Set.id.in_(set_ids))).all()}
+
+    lines: List[ExportLine] = []
+    for dc in dcs:
+        c = cards.get(dc.card_id)
+        if not c:
+            continue
+        category = c.supertype if c.supertype in _CATEGORIES else "Trainer"
+        s = sets.get(c.set_id)
+        lines.append(ExportLine(
+            category=category, qty=dc.quantity, name=c.name,
+            set_code=(s.ptcgo_code if s else None), number=c.number,
+        ))
+
+    text = format_decklist(lines)
+    safe = (deck.name or "deck").strip().lower().replace(" ", "-")
+    return {"text": text, "filename": f"{safe}-{deck_id}.txt"}
+
+
+@router.post("/import")
+def import_decklist(
+    payload: Dict[str, Any],
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
+):
+    """Create a new deck from PTCG Live decklist text.
+
+    Payload: `{text: str, name?: str, format?: str}`. Returns the new deck id plus
+    any lines that couldn't be matched to a catalog card.
+    """
+    text = str(payload.get("text") or "")
+    parsed = parse_decklist(text)
+    if not parsed:
+        raise HTTPException(422, "No card lines found in the decklist")
+
+    deck = Deck(
+        org_id=ctx.org_id,
+        user_id=current_user.id,
+        name=(payload.get("name") or "Imported deck").strip() or "Imported deck",
+        format=payload.get("format"),
+    )
+    session.add(deck)
+    session.commit()
+    session.refresh(deck)
+
+    added = 0
+    unresolved: List[dict] = []
+    # Merge duplicate card_ids so the same printing accumulates quantity.
+    resolved: Dict[str, int] = {}
+    for pc in parsed:
+        cid = _resolve_card_id(session, pc)
+        if cid is None:
+            unresolved.append({"qty": pc.qty, "name": pc.name,
+                               "set_code": pc.set_code, "number": pc.number})
+            continue
+        resolved[cid] = resolved.get(cid, 0) + pc.qty
+
+    for cid, qty in resolved.items():
+        session.add(DeckCard(deck_id=deck.id, card_id=cid, quantity=qty))
+        added += qty
+    session.commit()
+
+    return {
+        "deck_id": deck.id,
+        "name": deck.name,
+        "added": added,
+        "unique_cards": len(resolved),
+        "unresolved": unresolved,
+    }
 
 
 @router.patch("/{deck_id}")
