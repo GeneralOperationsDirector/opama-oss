@@ -26,6 +26,7 @@ import {
 } from "../../lib/api";
 import type { Deck, DeckWithCards } from "../../types";
 import { useToast } from "../../shared/Toaster";
+import DeckStatus from "./DeckStatus";
 
 export default function DecksTab({
   userId,
@@ -157,6 +158,13 @@ export default function DecksTab({
     };
   }, [activeDeck]);
 
+  // Signature of the deck's contents — re-validate when it changes.
+  const deckSignature = useMemo(() => {
+    if (!activeDeck) return "";
+    const lines = activeDeck.cards.map((dc) => `${dc.card_id}:${dc.quantity}`).sort().join(",");
+    return `${activeDeck.deck.format || ""}|${lines}`;
+  }, [activeDeck]);
+
   return (
     <Section title="Decks" icon={<Layers className="w-5 h-5 text-indigo-600" />}>
       <div className="flex gap-3 items-center mb-3 flex-wrap">
@@ -248,6 +256,7 @@ export default function DecksTab({
             <div className="text-xs text-slate-500">
               Format: {deckMeta?.format} • Total cards: {deckMeta?.count}
             </div>
+            <DeckStatus deckId={activeDeck.deck.id} signature={deckSignature} />
           </div>
 
           {/* Card list */}

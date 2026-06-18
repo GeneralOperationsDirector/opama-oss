@@ -6,13 +6,14 @@ and is scoped to the active organization (pool tenancy) via `_assert_deck_access
 card adds are idempotent (merge-on-duplicate by deck + card). Card *suggestions*
 live in the separate `opama_ai` router, not here.
 """
-from typing import List, Dict, Any
-from fastapi import APIRouter, Depends, HTTPException
+from typing import List, Dict, Any, Optional
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session, select
 
 from services.shared.database import get_session
 from services.shared.models import User
 from opama_pokemon_tcg.decks.models import Deck, DeckCard
+from opama_pokemon_tcg.decks.validation import validate_deck
 from opama_pokemon_tcg.catalog.models import Card
 from services.auth.middleware import get_current_user
 from services.auth.org_context import OrgContext, get_current_org
@@ -118,6 +119,49 @@ def get_deck(
             }
         )
     return {"deck": deck, "cards": hydrated}
+
+
+@router.get("/{deck_id}/validate")
+def validate_deck_endpoint(
+    deck_id: int,
+    format: Optional[str] = Query(None, description="standard | expanded | unlimited; defaults to the deck's format"),
+    session: Session = Depends(get_session),
+    ctx: OrgContext = Depends(get_current_org),
+):
+    """Validate a deck's construction + format legality.
+
+    Returns `{format, legal, total, counts, issues[]}`. Checks the 60-card count,
+    the ≤4-copy rule (basic Energy exempt), ≥1 Basic Pokémon, ACE SPEC/Radiant
+    limits, and per-card legality for the chosen format (defaults to the deck's
+    own `format`, else Standard).
+    """
+    deck = session.get(Deck, deck_id)
+    if not deck:
+        raise HTTPException(404, "Deck not found")
+    _assert_deck_access(deck, ctx)
+
+    dcs: List[DeckCard] = session.exec(
+        select(DeckCard).where(DeckCard.deck_id == deck_id)
+    ).all()
+    card_ids = list({dc.card_id for dc in dcs})
+    cards = {
+        c.id: c for c in session.exec(select(Card).where(Card.id.in_(card_ids))).all()
+    }
+
+    entries = [(cards[dc.card_id], dc.quantity) for dc in dcs if dc.card_id in cards]
+    result = validate_deck(entries, format or deck.format or "standard")
+
+    # Surface any deck cards whose catalog entry is missing (can't be validated).
+    missing = sorted({dc.card_id for dc in dcs if dc.card_id not in cards})
+    payload = result.to_dict()
+    if missing:
+        payload["issues"].append({
+            "code": "unknown_card", "severity": "warning",
+            "message": f"{len(missing)} card(s) not in the catalog and not validated.",
+            "card_name": None,
+        })
+        payload["legal"] = payload["legal"] and True  # missing cards are a warning, not an error
+    return payload
 
 
 @router.patch("/{deck_id}")
