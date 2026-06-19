@@ -35,7 +35,9 @@ from sqlmodel import Session, select
 from services.shared.database import get_session
 from services.shared.models import User
 from opama_pokemon_tcg.catalog.models import Set, Card
+from opama_pokemon_tcg.inventory.models import InventoryItem
 from services.auth.middleware import get_current_user
+from services.auth.org_context import OrgContext, get_current_org
 
 # Router is mounted in main.py with prefix="/cards"
 router = APIRouter(tags=["cards"])
@@ -55,6 +57,96 @@ def list_sets(session: Session = Depends(get_session)):
     Useful for populating dropdowns, lists, or metadata browsers.
     """
     return session.exec(select(Set)).all()
+
+
+# ---------------------------------------------------------------------------
+# Collection completion (per-set progress) — org-scoped
+# Declared before the dynamic /{set_id}/{number} route so they aren't shadowed.
+# ---------------------------------------------------------------------------
+
+
+@router.get("/sets/progress")
+def sets_progress(
+    session: Session = Depends(get_session),
+    ctx: OrgContext = Depends(get_current_org),
+):
+    """Per-set collection progress for the active organization.
+
+    Denominator is the number of cards the catalog holds for each set (the
+    official `Set.total` is only populated after a live sync, so it's surfaced as
+    `official_total` for reference). Only sets the org owns cards in are returned.
+    """
+    catalog_counts = dict(
+        session.exec(select(Card.set_id, func.count()).group_by(Card.set_id)).all()
+    )
+    owned = dict(
+        session.exec(
+            select(Card.set_id, func.count(func.distinct(InventoryItem.card_id)))
+            .select_from(InventoryItem)
+            .join(Card, Card.id == InventoryItem.card_id)
+            .where(InventoryItem.org_id == ctx.org_id)
+            .group_by(Card.set_id)
+        ).all()
+    )
+    sets = {s.id: s for s in session.exec(select(Set).where(Set.id.in_(list(owned.keys())))).all()}
+
+    rows = []
+    for sid, n_owned in owned.items():
+        s = sets.get(sid)
+        total = catalog_counts.get(sid, 0)
+        rows.append({
+            "set_id": sid,
+            "name": s.name if s else sid,
+            "series": s.series if s else None,
+            "release_date": s.release_date if s else None,
+            "owned": n_owned,
+            "total": total,
+            "official_total": (s.total if s else None),
+            "pct": round(100 * n_owned / total, 1) if total else 0.0,
+        })
+    rows.sort(key=lambda r: (-r["pct"], -r["owned"]))
+
+    return {
+        "summary": {
+            "sets_started": len(rows),
+            "cards_owned": sum(r["owned"] for r in rows),
+            "catalog_total": sum(catalog_counts.values()),
+        },
+        "sets": rows,
+    }
+
+
+@router.get("/sets/{set_id}/missing")
+def set_missing_cards(
+    set_id: str,
+    session: Session = Depends(get_session),
+    ctx: OrgContext = Depends(get_current_org),
+):
+    """The cards in a set the active org does NOT own yet (the want-list view)."""
+    owned_ids = set(
+        session.exec(
+            select(InventoryItem.card_id)
+            .select_from(InventoryItem)
+            .join(Card, Card.id == InventoryItem.card_id)
+            .where(InventoryItem.org_id == ctx.org_id, Card.set_id == set_id)
+        ).all()
+    )
+    cards = session.exec(
+        select(Card).where(Card.set_id == set_id).order_by(Card.number_sort, Card.number)
+    ).all()
+    missing = [
+        {
+            "card_id": c.id, "name": c.name, "number": c.number,
+            "rarity": c.rarity, "image_small": c.image_small,
+        }
+        for c in cards if c.id not in owned_ids
+    ]
+    return {
+        "set_id": set_id,
+        "total": len(cards),
+        "owned": len(cards) - len(missing),
+        "missing": missing,
+    }
 
 
 # ---------------------------------------------------------------------------

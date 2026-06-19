@@ -4,6 +4,7 @@ import { useToast } from "../../shared/Toaster";
 import PokedexControls from "./components/PokedexControls";
 import type { FilterMode, SeriesOrder, SortMode } from "./components/PokedexControls";
 import SetGrid from "./components/SetGrid";
+import CollectionSummary from "./CollectionSummary";
 import { api, listSets, searchCards } from "../../lib/api";
 import { CANON_RARITIES, canonRarity, SERIES_PREFIX_YEAR } from "./components/utils";
 import type { CanonRarity, CardRow, SetMeta } from "./components/utils";
@@ -190,6 +191,8 @@ export default function PokedexTab({
       icon={<BookOpen className="w-5 h-5 text-indigo-600" />}
       subtitle="Browse sets, track what you own, filter by rarity, and sort by stage/evolution."
     >
+      <CollectionSummary />
+
       <PokedexControls
         setQuery={setQuery} onSetQuery={setSetQuery}
         seriesOptions={seriesOrder === "asc" ? [...orderedSeries] : [...orderedSeries]} // ordered already
