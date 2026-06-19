@@ -11,14 +11,15 @@ Ownership: The authenticated user can only access their own wishlist/trade list.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from services.shared.database import get_session
 from opama_pokemon_tcg.trading.models import WishList, TradeItem
-from services.shared.models import User
+from services.shared.models import User, Organization, ORG_ROLE_OWNER
 from opama_pokemon_tcg.catalog.models import Card
 from services.auth.middleware import get_current_user
-from services.auth.org_context import OrgContext, get_current_org
+from services.auth.org_context import OrgContext, get_current_org, require_org_role
 
 router = APIRouter(prefix="/user", tags=["wish & trade"])
 
@@ -26,6 +27,124 @@ router = APIRouter(prefix="/user", tags=["wish & trade"])
 def _assert_owner(current_user: User, user_id: int) -> None:
     if current_user.id != user_id:
         raise HTTPException(403, "Cannot access another user's data")
+
+
+# ---------------------------------------------------------------------------
+# Cross-user trade matching (pool tenancy) — static routes, declared first.
+# ---------------------------------------------------------------------------
+
+
+class DiscoveryIn(BaseModel):
+    discoverable: bool
+
+
+@router.get("/discovery")
+def get_discovery(ctx: OrgContext = Depends(get_current_org)):
+    """Whether the active org is discoverable in the trade-matching network."""
+    return {"discoverable": bool(ctx.org.trade_discoverable)}
+
+
+@router.put("/discovery")
+def set_discovery(
+    body: DiscoveryIn,
+    session: Session = Depends(get_session),
+    ctx: OrgContext = Depends(require_org_role(ORG_ROLE_OWNER)),
+):
+    """Opt the active org in/out of trade discovery (owner only)."""
+    org = session.get(Organization, ctx.org_id)
+    org.trade_discoverable = bool(body.discoverable)
+    session.add(org)
+    session.commit()
+    return {"discoverable": org.trade_discoverable}
+
+
+def _card_brief(card: "Card | None", card_id: str) -> dict:
+    return {
+        "card_id": card_id,
+        "name": card.name if card else card_id,
+        "set_id": card.set_id if card else None,
+        "image_small": card.image_small if card else None,
+    }
+
+
+@router.get("/matches")
+def trade_matches(
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+    ctx: OrgContext = Depends(get_current_org),
+):
+    """Find discoverable orgs whose trade list holds cards on my wishlist (and,
+    where mutual, whose wishlist holds cards I'm offering).
+
+    Returns matches sorted mutual-first, then by overlap size. Each match lists
+    `they_have` (cards I want that they offer) and `they_want` (my offered cards
+    they want). Only orgs that have opted into discovery are considered.
+    """
+    my_org = ctx.org_id
+    my_wish = set(session.exec(select(WishList.card_id).where(WishList.org_id == my_org)).all())
+    my_trade = set(session.exec(select(TradeItem.card_id).where(TradeItem.org_id == my_org)).all())
+
+    empty = {"matches": [], "my_wishlist_count": len(my_wish),
+             "my_tradelist_count": len(my_trade), "discoverable_orgs": 0}
+    if not my_wish and not my_trade:
+        return empty
+
+    disc_ids = [
+        o for o in session.exec(
+            select(Organization.id).where(
+                Organization.trade_discoverable == True,  # noqa: E712
+                Organization.id != my_org,
+            )
+        ).all()
+    ]
+    if not disc_ids:
+        return empty
+
+    by_org: dict[int, dict] = {}
+    if my_wish:
+        for oid, cid in session.exec(
+            select(TradeItem.org_id, TradeItem.card_id).where(
+                TradeItem.org_id.in_(disc_ids), TradeItem.card_id.in_(list(my_wish))
+            )
+        ).all():
+            by_org.setdefault(oid, {"have": set(), "want": set()})["have"].add(cid)
+    if my_trade:
+        for oid, cid in session.exec(
+            select(WishList.org_id, WishList.card_id).where(
+                WishList.org_id.in_(disc_ids), WishList.card_id.in_(list(my_trade))
+            )
+        ).all():
+            by_org.setdefault(oid, {"have": set(), "want": set()})["want"].add(cid)
+
+    # Keep only orgs that offer something I want.
+    by_org = {oid: v for oid, v in by_org.items() if v["have"]}
+    if not by_org:
+        return {**empty, "discoverable_orgs": len(disc_ids)}
+
+    all_cids = set().union(*[v["have"] | v["want"] for v in by_org.values()])
+    cards = {c.id: c for c in session.exec(select(Card).where(Card.id.in_(list(all_cids)))).all()}
+    orgs = {o.id: o for o in session.exec(
+        select(Organization).where(Organization.id.in_(list(by_org.keys())))).all()}
+
+    matches = []
+    for oid, v in by_org.items():
+        o = orgs.get(oid)
+        matches.append({
+            "org_id": oid,
+            "org_name": o.name if o else f"Org {oid}",
+            "org_slug": o.slug if o else None,
+            "mutual": bool(v["have"] and v["want"]),
+            "they_have": [_card_brief(cards.get(c), c) for c in sorted(v["have"])],
+            "they_want": [_card_brief(cards.get(c), c) for c in sorted(v["want"])],
+        })
+    matches.sort(key=lambda mm: (not mm["mutual"], -(len(mm["they_have"]) + len(mm["they_want"]))))
+
+    return {
+        "matches": matches,
+        "my_wishlist_count": len(my_wish),
+        "my_tradelist_count": len(my_trade),
+        "discoverable_orgs": len(disc_ids),
+    }
 
 
 # ---------------------------------------------------------------------------

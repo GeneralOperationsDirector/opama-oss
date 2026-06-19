@@ -16,6 +16,7 @@ import { Repeat, Trash2 } from "lucide-react";
 import CardTile from "../../shared/CardTile";
 import { useToast } from "../../shared/Toaster";
 import { getTradeList, upsertTradeItem, removeTradeItem } from "../../lib/api";
+import TradeMatches from "./TradeMatches";
 
 type CardLite = {
   id: string;
@@ -101,6 +102,7 @@ export default function TradeTab({
 
   return (
     <Section title="Cards to Trade" icon={<Repeat className="w-5 h-5 text-indigo-600" />}>
+      <TradeMatches onOpenDetails={onOpenDetails} />
       {loading ? (
         <div className="text-sm text-slate-600">Loading…</div>
       ) : rows.length === 0 ? (

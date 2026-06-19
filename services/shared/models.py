@@ -144,6 +144,9 @@ class Organization(SQLModel, table=True):
     # POST /assets/website-listings/{slug}/sold). Scopes the storefront pull + sale
     # webhook to this one org under pool tenancy. Null until the owner generates one.
     export_key: Optional[str] = Field(default=None, unique=True, index=True)
+    # Opt-in: when true, this org's trade list / wishlist are visible to the
+    # cross-user trade-matching engine (and an RLS discovery-read policy). Off by default.
+    trade_discoverable: bool = Field(default=False)
 
 
 class Membership(SQLModel, table=True):
