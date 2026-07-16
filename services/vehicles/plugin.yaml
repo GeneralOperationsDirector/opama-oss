@@ -13,4 +13,4 @@ tools_module: services.vehicles.tools
 requires:
   - auth
   - custom_assets
-requires_core: ">=0.1.0,<0.2.0"
+requires_core: ">=0.1.0,<0.3.0"
