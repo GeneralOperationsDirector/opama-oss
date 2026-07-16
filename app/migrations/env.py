@@ -13,7 +13,7 @@ from sqlmodel import SQLModel
 from alembic import context
 
 # Load env files so DATABASE_URL is available when running alembic CLI
-_root = Path(__file__).resolve().parents[1]
+_root = Path(__file__).resolve().parents[2]
 load_dotenv(_root / ".env")
 load_dotenv(_root / ".env.local", override=True)
 

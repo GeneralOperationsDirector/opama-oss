@@ -21,8 +21,9 @@ try:
 except ImportError:
     _HAS_JWT = False
 
-# RSA-2048 public key (generated 2026-06-05, paired with generate_license_key.py)
-_PUBLIC_KEY = """\
+# RSA-2048 public key (generated 2026-06-05, paired with generate_license_key.py).
+# Override with OPAMA_LICENSE_PUBLIC_KEY env var for CI / alternative deployments.
+_PUBLIC_KEY_DEFAULT = """\
 -----BEGIN PUBLIC KEY-----
 MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA3VqzJbWjsCt6MTpos0RH
 JjzX5AI5kgUv7eT8BXdEzBC2GwxLZorCxj+p+E0uQVfn9wpsC+iU+DoqKJl1Whq/
@@ -32,6 +33,7 @@ fjljTDUop1H7HD1d4NFECp+roO98/28NkNIsLUu6/+sNucQBdueauJtUsNb+npq1
 bEGP79rKTN3bWLqFoMwUu52PSEc7smafPvXMDRrF3UlegSXc3IuFuO+ruf3SFHQq
 2QIDAQAB
 -----END PUBLIC KEY-----"""
+_PUBLIC_KEY = os.environ.get("OPAMA_LICENSE_PUBLIC_KEY", _PUBLIC_KEY_DEFAULT)
 
 TIER_RANK: dict[str, int] = {"core": 0, "free": 1, "premium": 2, "enterprise": 3}
 
