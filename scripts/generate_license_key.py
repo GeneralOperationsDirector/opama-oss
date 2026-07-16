@@ -38,21 +38,22 @@ except ImportError:
 # To create a new keypair (the matching public key goes in app/license.py):
 #   openssl genrsa -out license_signing_key.pem 2048
 _KEY_PATH = os.environ.get("OPAMA_LICENSE_SIGNING_KEY", "license_signing_key.pem")
+_PRIVATE_KEY: str | None = None
 try:
     with open(_KEY_PATH) as _fh:
         _PRIVATE_KEY = _fh.read()
 except FileNotFoundError:
-    print(
-        f"ERROR: license signing key not found at {_KEY_PATH!r}.\n"
-        "Set OPAMA_LICENSE_SIGNING_KEY or place license_signing_key.pem in the CWD.",
-        file=sys.stderr,
-    )
-    sys.exit(1)
+    pass  # generate_key() raises if called without the key
 
 VALID_TIERS = {"core", "free", "premium", "enterprise"}
 
 
 def generate_key(customer: str, tier: str, modules: str, days: int) -> str:
+    if _PRIVATE_KEY is None:
+        raise RuntimeError(
+            f"License signing key not found at {_KEY_PATH!r}.\n"
+            "Set OPAMA_LICENSE_SIGNING_KEY or place license_signing_key.pem in the CWD."
+        )
     now = datetime.now(tz=timezone.utc)
     modules_value: list[str] | str = (
         "*" if modules.strip() == "*"
@@ -94,4 +95,11 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    if _PRIVATE_KEY is None:
+        print(
+            f"ERROR: license signing key not found at {_KEY_PATH!r}.\n"
+            "Set OPAMA_LICENSE_SIGNING_KEY or place license_signing_key.pem in the CWD.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
     main()

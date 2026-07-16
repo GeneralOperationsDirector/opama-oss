@@ -151,10 +151,14 @@ class TestPluginTiers:
         core = {p.id for p in all_plugins if p.tier == "core"}
         assert core == {"custom_assets", "licensing", "plugin_store", "system", "integrations"}
 
-    def test_twelve_premium_plugins(self, all_plugins):
-        """Expected exactly 12 premium plugins (Phase 3 + Shopify scaffold + github_publish extraction)."""
+    def test_premium_plugins(self, all_plugins):
+        """Expected 11 committed premium plugins (marketplace is gitignored/optional, not counted)."""
         premium = [p for p in all_plugins if p.tier == "premium"]
-        assert len(premium) == 12, f"Expected 12 premium plugins, got {len(premium)}: {[p.id for p in premium]}"
+        # Filter out optional gitignored plugins (e.g. marketplace).
+        committed_premium = [p for p in premium if p.id != "marketplace"]
+        assert len(committed_premium) == 11, (
+            f"Expected 11 premium plugins, got {len(committed_premium)}: {[p.id for p in committed_premium]}"
+        )
 
     def test_no_unknown_tiers(self, all_plugins):
         valid = {"core", "free", "premium", "enterprise"}
