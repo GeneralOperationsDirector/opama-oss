@@ -66,7 +66,8 @@ from app.plugin_signing import _sign
 
 logger = logging.getLogger(__name__)
 
-DYNAMIC_PLUGINS_ROOT = Path(os.getenv("DYNAMIC_PLUGINS_ROOT", "/app/dynamic_plugins"))
+_default_dp_root = Path(__file__).resolve().parent.parent / "dynamic_plugins"
+DYNAMIC_PLUGINS_ROOT = Path(os.getenv("DYNAMIC_PLUGINS_ROOT", str(_default_dp_root)))
 
 # Generous enough for real plugin packages, tight enough to bound worst-case
 # disk/memory use against a malicious or compromised vendor server.

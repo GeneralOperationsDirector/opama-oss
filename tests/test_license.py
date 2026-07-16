@@ -9,6 +9,7 @@ Run with:
 import sys
 from datetime import datetime, timezone, timedelta
 
+import pytest
 
 # Make sure project root is on the path
 sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[1]))
@@ -20,9 +21,15 @@ from app.license import (
     TIER_RANK,
 )
 
-# Ensure the key generator is importable
+# Ensure the key generator is importable (key may not be present in CI before
+# the test keypair step runs, but import must not crash pytest collection).
 sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[1] / "scripts"))
-from generate_license_key import generate_key
+from generate_license_key import generate_key, _PRIVATE_KEY
+
+_needs_key = pytest.mark.skipif(
+    _PRIVATE_KEY is None,
+    reason="OPAMA_LICENSE_SIGNING_KEY / license_signing_key.pem not available",
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -96,6 +103,7 @@ class TestDecodeLicense:
         result = decode_license("not-a-jwt-at-all")
         assert result.valid is False
 
+    @_needs_key
     def test_valid_premium_star_key(self):
         raw = _make_key("Blair", "premium", "*", 365)
         info = decode_license(raw)
@@ -105,23 +113,27 @@ class TestDecodeLicense:
         assert info.customer == "Blair"
         assert info.expires_at is not None
 
+    @_needs_key
     def test_valid_key_expiry_is_future(self):
         raw = _make_key(days=365)
         info = decode_license(raw)
         assert info.valid is True
         assert info.expires_at > datetime.now(tz=timezone.utc)
 
+    @_needs_key
     def test_valid_key_with_module_list(self):
         raw = _make_key(modules="grading,portfolio")
         info = decode_license(raw)
         assert info.valid is True
         assert info.modules == ["grading", "portfolio"]
 
+    @_needs_key
     def test_valid_key_enterprise_tier(self):
         raw = _make_key(tier="enterprise")
         info = decode_license(raw)
         assert info.tier == "enterprise"
 
+    @_needs_key
     def test_expired_key_returns_invalid(self):
         # days=0 produces a key that is already expired
         raw = _make_key(days=-1)
@@ -129,6 +141,7 @@ class TestDecodeLicense:
         assert info.valid is False
         assert "expired" in info.message.lower() or "invalid" in info.message.lower()
 
+    @_needs_key
     def test_tampered_key_returns_invalid(self):
         raw = _make_key()
         # Flip a char in the payload section
@@ -139,6 +152,7 @@ class TestDecodeLicense:
         info = decode_license(tampered)
         assert info.valid is False
 
+    @_needs_key
     def test_wrong_issuer_returns_invalid(self):
         # Build a key manually with wrong issuer using the private key
         import jwt as _jwt
@@ -179,6 +193,7 @@ class TestGetLicense:
         assert info.allows_plugin("grading", "premium") is True
         assert info.allows_plugin("system", "core") is True
 
+    @_needs_key
     def test_valid_key_via_env_var(self, monkeypatch):
         raw = _make_key("Blair", "premium", "*", 365)
         monkeypatch.setenv("OPAMA_LICENSE_KEY", raw)

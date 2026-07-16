@@ -20,7 +20,7 @@ API_BASE = os.getenv("API_BASE", "http://localhost:6000")
 TIMEOUT = 5
 
 EXPECTED_PLUGIN_IDS = {
-    "ai", "catalog", "custom_assets", "decks", "github_publish", "grading",
+    "ai", "ai_assistant", "catalog", "custom_assets", "decks", "github_publish", "grading",
     "insurance", "integrations", "inventory", "licensing", "plugin_store",
     "portfolio", "real_estate", "showcase", "storefront", "system", "trading",
     "vehicles",
